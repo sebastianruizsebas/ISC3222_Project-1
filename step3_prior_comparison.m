@@ -190,14 +190,14 @@ xline(5, 'k:', 'LineWidth', 1.5);
 
 % Subplot 6: Variance in velocity estimates (stability)
 subplot(2,3,6);
-window = 50;  % 0.5 second window
-v_variance = zeros(length(results), N - window);
+window = 50;  % 0.5 second window (50 samples)
+v_variance = zeros(length(results), N - window + 1);
 for j = 1:length(results)
-    for i = 1:(N - window)
-        v_variance(j, i) = var(results(j).v_history(i:i+window));
+    for i = 1:(N - window + 1)
+        v_variance(j, i) = var(results(j).v_history(i:i+window-1));
     end
 end
-t_var = t(1:N-window);
+t_var = t(1:N-window+1);
 for j = 1:length(results)
     plot(t_var, v_variance(j,:), 'LineWidth', 2.5, ...
         'Color', results(j).color, 'DisplayName', results(j).label); hold on;
@@ -234,8 +234,17 @@ for j = 1:length(results)
     % Final velocity error
     final_error = abs(results(j).v_history(end) - true_velocity(end));
     
-    % Average variance (stability measure)
-    avg_variance = mean(var(reshape(results(j).v_history(post_change), [], 50), 0, 1));
+    % Average variance (stability measure) using 50-sample non-overlapping windows
+    vh = results(j).v_history(post_change);
+    win = 50;
+    m = numel(vh);
+    nwin = floor(m / win);
+    if nwin > 0
+        data = reshape(vh(1:nwin*win), win, nwin);  % each column is one window
+        avg_variance = mean(var(data, 0, 1));       % variance per window, then average
+    else
+        avg_variance = var(vh);                    % fallback for very short vectors
+    end
     
     fprintf('%-25s | %8.2fs | %10.4f | %10.6f\n', ...
         results(j).label, adapt_time, final_error, avg_variance);
