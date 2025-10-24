@@ -41,7 +41,7 @@ catch ME
     return;
 end
 
-if pause_between_steps
+if exist('pause_between_steps','var') && pause_between_steps
     fprintf('\nPress any key to continue to Step 2...\n');
     pause;
 end
@@ -61,7 +61,7 @@ catch ME
     return;
 end
 
-if pause_between_steps
+if exist('pause_between_steps','var') && pause_between_steps
     fprintf('\nPress any key to continue to Step 3...\n');
     pause;
 end
@@ -81,7 +81,7 @@ catch ME
     return;
 end
 
-if pause_between_steps
+if exist('pause_between_steps','var') && pause_between_steps
     fprintf('\nPress any key to continue to Step 4...\n');
     pause;
 end
