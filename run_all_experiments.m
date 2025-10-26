@@ -154,9 +154,10 @@ grid on; box on;
 
 % Subplot 2: Prior strength effects
 subplot(1,3,2);
-true_v = [ones(1, length(results(1).v_history)/2) * 2, ...
-          ones(1, length(results(1).v_history)/2) * -1];
-t_prior = linspace(0, 10, length(true_v));
+Nres = length(results(1).v_history);
+mid = floor(Nres/2);
+true_v = [2*ones(1, mid), -1*ones(1, Nres - mid)];
+t_prior = linspace(0, 10, Nres);
 plot(t_prior, true_v, 'k--', 'LineWidth', 2.5, 'DisplayName', 'True'); hold on;
 for j = 1:length(results)
     plot(t_prior, results(j).v_history, 'LineWidth', 2, ...
