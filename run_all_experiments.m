@@ -137,7 +137,7 @@ fprintf('└──────────────────────�
 fprintf('\n');
 
 try
-    run('step6_architecture_comparison.m');
+    run('step6_compare_architectures.m');
     fprintf('\n✓ Step 6 completed successfully\n');
 catch ME
     fprintf('\n✗ Step 6 failed: %s\n', ME.message);
