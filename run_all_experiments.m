@@ -12,6 +12,11 @@
 
 clear all; close all; clc;
 
+% Create output directory for figures
+if ~exist('figures', 'dir')
+    mkdir('figures');
+end
+
 fprintf('\n');
 fprintf('========================================================\n');
 fprintf('   PREDICTIVE CODING: ACTIVE INFERENCE SIMULATION\n');
@@ -39,6 +44,9 @@ fprintf('\n');
 try
     run('step1_symbolic_derivation.m');
     fprintf('\n✓ Step 1 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step1_symbolic_derivation.png');
+    fprintf('  Figure saved to: figures/step1_symbolic_derivation.png\n');
 catch ME
     fprintf('\n✗ Step 1 failed: %s\n', ME.message);
     return;
@@ -59,6 +67,9 @@ fprintf('\n');
 try
     run('step2_numerical_simulation.m');
     fprintf('\n✓ Step 2 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step2_numerical_simulation.png');
+    fprintf('  Figure saved to: figures/step2_numerical_simulation.png\n');
 catch ME
     fprintf('\n✗ Step 2 failed: %s\n', ME.message);
     return;
@@ -79,6 +90,9 @@ fprintf('\n');
 try
     run('step3_prior_comparison.m');
     fprintf('\n✓ Step 3 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step3_prior_comparison.png');
+    fprintf('  Figure saved to: figures/step3_prior_comparison.png\n');
 catch ME
     fprintf('\n✗ Step 3 failed: %s\n', ME.message);
     return;
@@ -99,6 +113,9 @@ fprintf('\n');
 try
     run('step4_ode45_version.m');
     fprintf('\n✓ Step 4 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step4_ode45_version.png');
+    fprintf('  Figure saved to: figures/step4_ode45_version.png\n');
 catch ME
     fprintf('\n✗ Step 4 failed: %s\n', ME.message);
     return;
@@ -119,6 +136,9 @@ fprintf('\n');
 try
     run('step5_rao_ballard_extension.m');
     fprintf('\n✓ Step 5 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step5_rao_ballard_extension.png');
+    fprintf('  Figure saved to: figures/step5_rao_ballard_extension.png\n');
 catch ME
     fprintf('\n✗ Step 5 failed: %s\n', ME.message);
     return;
@@ -139,6 +159,9 @@ fprintf('\n');
 try
     run('step6_compare_architectures.m');
     fprintf('\n✓ Step 6 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step6_compare_architectures.png');
+    fprintf('  Figure saved to: figures/step6_compare_architectures.png\n');
 catch ME
     fprintf('\n✗ Step 6 failed: %s\n', ME.message);
     return;
@@ -159,6 +182,9 @@ fprintf('\n');
 try
     run('step7_image_prediction.m');
     fprintf('\n✓ Step 7 completed successfully\n');
+    % Save figure
+    saveas(gcf, 'figures/step7_image_prediction.png');
+    fprintf('  Figure saved to: figures/step7_image_prediction.png\n');
 catch ME
     fprintf('\n✗ Step 7 failed: %s\n', ME.message);
     return;
@@ -188,6 +214,9 @@ fprintf('  • Figure 4: ODE45 High-Precision (6 subplots)\n');
 fprintf('  • Figure 5: Rao & Ballard Extension\n');
 fprintf('  • Figure 6: Architecture Comparison\n');
 fprintf('  • Figure 7: 2D Spatial Prediction\n');
+fprintf('  • Summary: Project Overview\n');
+fprintf('\n');
+fprintf('All figures saved to: figures/*.png\n');
 fprintf('\n');
 
 %% Optional: Summary Comparison Plot
@@ -264,9 +293,14 @@ end
 
 sgtitle('Predictive Coding Project Summary', 'FontSize', 14, 'FontWeight', 'bold');
 
+% Save summary figure
+saveas(gcf, 'figures/project_summary.png');
+fprintf('  Summary figure saved to: figures/project_summary.png\n');
+
 fprintf('\n');
 fprintf('========================================================\n');
 fprintf('   Project complete! Review figures and .mat files.\n');
+fprintf('   All figures saved to: figures/ directory\n');
 fprintf('   See README.md for detailed interpretation.\n');
 fprintf('========================================================\n');
 fprintf('\n');
