@@ -33,8 +33,9 @@ fprintf('Creating sensory input (moving target)...\n');
 % This sudden change tests the system's adaptation ability
 
 true_velocity = zeros(1, N);
-true_velocity(1:N/2) = 2;          % First half: move right
-true_velocity(N/2+1:end) = -1;     % Second half: move left
+mid = floor(N/2);
+true_velocity(1:mid) = 2;          % First half: move right
+true_velocity(mid+1:end) = -1;     % Second half: move left
 
 % Integrate to get position
 true_position = cumsum(true_velocity) * dt;
@@ -184,7 +185,7 @@ sgtitle('Predictive Coding: Two-Level Visual Motion Model', ...
 fprintf('\nPerformance Metrics:\n');
 
 % Adaptation time after velocity change
-change_idx = round(N/2);
+change_idx = mid + 1;  % Index where velocity changes (t ≈ 5s)
 post_change = change_idx:N;
 
 % How long to adapt? (when velocity error drops below 20% of change magnitude)

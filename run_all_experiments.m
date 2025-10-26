@@ -24,7 +24,10 @@ fprintf('Configuration:\n');
 fprintf('  Press any key after each step to continue...\n');
 fprintf('  (or modify this script to run non-interactively)\n\n');
 
-pause_between_steps = true;  % Set to false to run all without pausing
+% Default: pause between steps (can be overridden from caller)
+if ~exist('pause_between_steps','var')
+    pause_between_steps = true;  % Set to false to run all without pausing
+end
 
 %% Step 1: Symbolic Derivation
 fprintf('\n');

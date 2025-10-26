@@ -23,8 +23,9 @@ N = length(t);
 
 % Sensory input (same as Step 2)
 true_velocity = zeros(1, N);
-true_velocity(1:N/2) = 2;
-true_velocity(N/2+1:end) = -1;
+mid = floor(N/2);
+true_velocity(1:mid) = 2;
+true_velocity(mid+1:end) = -1;
 true_position = cumsum(true_velocity) * dt;
 
 % Add noise
@@ -216,7 +217,7 @@ fprintf('\nQuantitative Analysis:\n');
 fprintf('%-25s | %10s | %10s | %10s\n', 'Prior Type', 'Adapt Time', 'Final Error', 'Avg Variance');
 fprintf('%s\n', repmat('-', 1, 70));
 
-change_idx = round(N/2);
+change_idx = mid + 1;    % first index after change (t ≈ 5s)
 post_change = change_idx:N;
 
 for j = 1:length(results)
