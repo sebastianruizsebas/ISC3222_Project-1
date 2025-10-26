@@ -152,7 +152,7 @@ sgtitle('Rao & Ballard Predictive Coding: Three-Level Hierarchy', ...
 % 1. Position inference
 subplot(3, 3, 1);
 plot(t, true_x, 'k--', 'LineWidth', 2.5, 'DisplayName', 'True'); hold on;
-plot(t, x_obs, 'Color', '#B3B3B3', 'LineWidth', 0.5, ...
+plot(t, x_obs, [0.7 0.7 0.7], 'LineWidth', 0.5, ...
      'DisplayName', 'Noisy Obs');
 plot(t, x_rep, 'b-', 'LineWidth', 2, 'DisplayName', 'Inferred');
 xline(5, 'red', ':', 'LineWidth', 1.5);
@@ -224,7 +224,7 @@ grid on;
 
 % 8. Free energy
 subplot(3, 3, 8);
-plot(t, free_energy, 'Color', '#9933CC', 'LineWidth', 2);
+plot(t, free_energy, 'm-', 'LineWidth', 2);
 xline(5, 'red', ':', 'LineWidth', 1.5);
 xlabel('Time (s)', 'FontSize', 11);
 ylabel('Free Energy', 'FontSize', 11);
@@ -241,7 +241,7 @@ text(0.5, 0.9, 'Rao & Ballard Architecture', 'FontSize', 13, ...
 y_levels = [0.7, 0.5, 0.3, 0.1];
 labels = {'Level 3: Acceleration (a)', 'Level 2: Velocity (v)', ...
           'Level 1: Position (x)', 'Sensory Input (x_{obs})'};
-colors = {'red', 'green', 'blue', 'gray'};
+colors = {'red', 'green', 'blue', 'cyan'};
 
 for i = 1:4
     rectangle('Position', [0.2, y_levels(i)-0.05, 0.6, 0.08], ...
