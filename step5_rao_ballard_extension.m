@@ -224,7 +224,7 @@ grid on;
 
 % 8. Free energy
 subplot(3, 3, 8);
-plot(t, free_energy, 'purple', 'LineWidth', 2);
+plot(t, free_energy, 'Color', [0.6 0.2 0.8], 'LineWidth', 2);
 xline(5, 'r:', 'LineWidth', 1.5, 'Alpha', 0.5);
 xlabel('Time (s)', 'FontSize', 11);
 ylabel('Free Energy', 'FontSize', 11);
