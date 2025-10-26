@@ -11,17 +11,18 @@ fprintf('==================================================\n\n');
 if exist('simulation_results.mat', 'file')
     prev = load('simulation_results.mat');
     dt = prev.t(2) - prev.t(1);
-    kappa_v = prev.kappa_v;
-    sigma_x = prev.sigma_x;
-    fprintf('Loaded parameters from Step 2:\n');
+    % Use default values since these aren't saved in Step 2
+    kappa_v = 2.0;
+    sigma_x = 0.1;  % Match Step 2's sigma_x value
+    fprintf('Loaded time step from Step 2:\n');
     fprintf('  dt = %.4f s\n', dt);
-    fprintf('  kappa_v = %.2f\n', kappa_v);
-    fprintf('  sigma_x = %.2f\n\n', sigma_x);
+    fprintf('  kappa_v = %.2f (default)\n', kappa_v);
+    fprintf('  sigma_x = %.2f (default)\n\n', sigma_x);
 else
     % Default parameters
     dt = 0.01;
     kappa_v = 2.0;
-    sigma_x = 0.5;
+    sigma_x = 0.1;
     fprintf('Using default parameters (Step 2 not found)\n\n');
 end
 
