@@ -104,6 +104,66 @@ catch ME
     return;
 end
 
+if exist('pause_between_steps','var') && pause_between_steps
+    fprintf('\nPress any key to continue to Step 5...\n');
+    pause;
+end
+
+%% Step 5: Rao & Ballard Extension
+fprintf('\n');
+fprintf('┌────────────────────────────────────────────────────────┐\n');
+fprintf('│ STEP 5: Rao & Ballard Extension                       │\n');
+fprintf('└────────────────────────────────────────────────────────┘\n');
+fprintf('\n');
+
+try
+    run('step5_rao_ballard_extension.m');
+    fprintf('\n✓ Step 5 completed successfully\n');
+catch ME
+    fprintf('\n✗ Step 5 failed: %s\n', ME.message);
+    return;
+end
+
+if exist('pause_between_steps','var') && pause_between_steps
+    fprintf('\nPress any key to continue to Step 6...\n');
+    pause;
+end
+
+%% Step 6: Architecture Comparison
+fprintf('\n');
+fprintf('┌────────────────────────────────────────────────────────┐\n');
+fprintf('│ STEP 6: Architecture Comparison                       │\n');
+fprintf('└────────────────────────────────────────────────────────┘\n');
+fprintf('\n');
+
+try
+    run('step6_architecture_comparison.m');
+    fprintf('\n✓ Step 6 completed successfully\n');
+catch ME
+    fprintf('\n✗ Step 6 failed: %s\n', ME.message);
+    return;
+end
+
+if exist('pause_between_steps','var') && pause_between_steps
+    fprintf('\nPress any key to continue to Step 7...\n');
+    pause;
+end
+
+%% Step 7: 2D Spatial Prediction
+fprintf('\n');
+fprintf('┌────────────────────────────────────────────────────────┐\n');
+fprintf('│ STEP 7: 2D Image Prediction Extension                 │\n');
+fprintf('└────────────────────────────────────────────────────────┘\n');
+fprintf('\n');
+
+try
+    run('step7_image_prediction.m');
+    fprintf('\n✓ Step 7 completed successfully\n');
+catch ME
+    fprintf('\n✗ Step 7 failed: %s\n', ME.message);
+    return;
+end
+
 %% Summary
 fprintf('\n');
 fprintf('========================================================\n');
@@ -116,13 +176,18 @@ fprintf('  • symbolic_derivations.mat       (Step 1 output)\n');
 fprintf('  • simulation_results.mat         (Step 2 output)\n');
 fprintf('  • prior_comparison_results.mat   (Step 3 output)\n');
 fprintf('  • ode45_results.mat              (Step 4 output)\n');
-fprintf('\n');
+fprintf('  • rao_ballard_results.mat        (Step 5 output)\n');
+fprintf('  • architecture_comparison.mat    (Step 6 output)\n');
+fprintf('  • image_prediction_results.mat   (Step 7 output)\n');
 
 fprintf('Figures generated:\n');
 fprintf('  • Figure 1: Symbolic Derivation (equations)\n');
 fprintf('  • Figure 2: Numerical Simulation (6 subplots)\n');
 fprintf('  • Figure 3: Prior Comparison (6 subplots)\n');
 fprintf('  • Figure 4: ODE45 High-Precision (6 subplots)\n');
+fprintf('  • Figure 5: Rao & Ballard Extension\n');
+fprintf('  • Figure 6: Architecture Comparison\n');
+fprintf('  • Figure 7: 2D Spatial Prediction\n');
 fprintf('\n');
 
 %% Optional: Summary Comparison Plot

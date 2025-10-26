@@ -91,6 +91,14 @@ dv/dt = -∂F/∂v = (x_obs - v) / σ_x² - (v - μ_v) / σ_v²
    - Generates summary comparison figure
    - **START HERE** for full demonstration
 
+6. **`step5_rao_ballard_extension.m`**
+   - Implements the three-level Rao & Ballard hierarchical model
+   - Compares with original two-level model
+
+7. **`step6_compare_architectures.m`**
+   - Compares results of two-level vs. three-level models
+   - Analyzes prediction error dynamics
+
 ### Output Files (Generated)
 
 - `symbolic_derivations.mat` - Symbolic expressions
@@ -131,6 +139,12 @@ step3_prior_comparison
 
 % Step 4: High-precision ODE45
 step4_ode45_version
+
+% Step 5: Rao & Ballard three-level model
+step5_rao_ballard_extension
+
+% Step 6: Compare two-level vs. three-level architectures
+step6_compare_architectures
 ```
 
 ---
@@ -241,6 +255,37 @@ Psychiatric conditions may arise from imbalanced priors—too strong or too weak
 - Reports max and RMS differences
 - ODE45 typically more accurate by 2-3 orders of magnitude
 - Fewer time steps needed (adaptive)
+
+---
+
+### Step 5: Rao & Ballard Extension
+
+**New in this step:**
+- Three-level hierarchical model (position → velocity → acceleration)
+- Explicit prediction and error units
+- Separate learning rates for representations vs. errors
+- Cascading inference through multiple levels
+
+**Run:**
+```matlab
+step5_rao_ballard_extension
+step6_compare_architectures
+```
+
+**Key architectural differences:**
+
+| Feature | Free Energy (Steps 2-4) | Rao & Ballard (Step 5) |
+|---------|-------------------------|------------------------|
+| **Predictions** | Implicit | Explicit units |
+| **Errors** | Gradient terms | Separate neurons |
+| **Levels** | 2 (x, v) | 3 (x, v, a) |
+| **Neural realism** | Abstract | Closer to cortex |
+| **Computation** | Gradient descent | Error propagation |
+
+**Applications:**
+- Visual cortex modeling (V1 → V2 → MT hierarchy)
+- Demonstrates cortical microcircuit structure
+- Canonical computation across brain regions
 
 ---
 
