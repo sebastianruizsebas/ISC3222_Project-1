@@ -152,7 +152,7 @@ sgtitle('Rao & Ballard Predictive Coding: Three-Level Hierarchy', ...
 % 1. Position inference
 subplot(3, 3, 1);
 plot(t, true_x, 'k--', 'LineWidth', 2.5, 'DisplayName', 'True'); hold on;
-plot(t, x_obs, 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5, ...
+plot(t, x_obs, 'Color', '#B3B3B3', 'LineWidth', 0.5, ...
      'DisplayName', 'Noisy Obs');
 plot(t, x_rep, 'b-', 'LineWidth', 2, 'DisplayName', 'Inferred');
 xline(5, 'red', ':', 'LineWidth', 1.5);
@@ -224,7 +224,7 @@ grid on;
 
 % 8. Free energy
 subplot(3, 3, 8);
-plot(t, free_energy, 'Color', [0.6 0.2 0.8], 'LineWidth', 2);
+plot(t, free_energy, 'Color', '#9933CC', 'LineWidth', 2);
 xline(5, 'red', ':', 'LineWidth', 1.5);
 xlabel('Time (s)', 'FontSize', 11);
 ylabel('Free Energy', 'FontSize', 11);
