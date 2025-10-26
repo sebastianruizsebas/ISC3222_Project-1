@@ -6,6 +6,10 @@ clear; clc; close all;
 
 % Load both models
 load('simulation_results.mat');        % Your original (Step 2)
+free_energy_original = free_energy;    % Rename to avoid conflict
+v_history_original = v_history;
+t_original = t;
+
 load('rao_ballard_results.mat');       % Rao & Ballard (Step 5)
 
 fprintf('=== COMPARING ARCHITECTURES ===\n\n');
@@ -17,9 +21,9 @@ sgtitle('Architecture Comparison: Free Energy vs. Rao & Ballard', ...
 
 % Original model (left column)
 subplot(2, 3, 1);
-plot(t, v_history, 'b-', 'LineWidth', 2); hold on;
-plot(t, true_velocity, 'k--', 'LineWidth', 2);
-xline(5, 'r:', 'LineWidth', 1.5);
+plot(t_original, v_history_original, 'b-', 'LineWidth', 2); hold on;
+plot(t_original, true_velocity, 'k--', 'LineWidth', 2);
+xline(5, 'red', ':', 'LineWidth', 1.5);
 title('Free Energy: Velocity (2-level)', 'FontWeight', 'bold');
 xlabel('Time (s)'); ylabel('Velocity');
 legend('Estimated', 'True', 'Location', 'best');
@@ -46,11 +50,11 @@ grid on;
 
 % Error comparison
 subplot(2, 3, 4);
-fe_err = abs(v_history - true_velocity);
+fe_err = abs(v_history_original - true_velocity);
 rb_err = abs(v_rep - true_v);
-plot(t, fe_err, 'b-', 'LineWidth', 2, 'DisplayName', 'Free Energy'); hold on;
+plot(t_original, fe_err, 'b-', 'LineWidth', 2, 'DisplayName', 'Free Energy'); hold on;
 plot(t, rb_err, 'g-', 'LineWidth', 2, 'DisplayName', 'Rao & Ballard');
-xline(5, 'r:', 'LineWidth', 1.5);
+xline(5, 'red', ':', 'LineWidth', 1.5);
 title('Velocity Inference Error', 'FontWeight', 'bold');
 xlabel('Time (s)'); ylabel('Absolute Error');
 legend('Location', 'best');
@@ -58,11 +62,11 @@ grid on;
 
 % Free energy comparison
 subplot(2, 3, 5);
-plot(t, free_energy_original, 'b-', 'LineWidth', 2, ...
+plot(t_original, free_energy_original, 'b-', 'LineWidth', 2, ...
      'DisplayName', 'Free Energy'); hold on;
 plot(t, free_energy, 'g-', 'LineWidth', 2, ...
      'DisplayName', 'Rao & Ballard');
-xline(5, 'r:', 'LineWidth', 1.5);
+xline(5, 'red', ':', 'LineWidth', 1.5);
 title('Model Evidence', 'FontWeight', 'bold');
 xlabel('Time (s)'); ylabel('Free Energy');
 legend('Location', 'best');
