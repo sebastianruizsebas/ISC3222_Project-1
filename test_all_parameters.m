@@ -454,11 +454,14 @@ sgtitle('Test 5: Rao & Ballard Precision Weight Effects', 'FontSize', 14, 'FontW
 % Position representations
 subplot(3,3,1);
 hold on;
+config_labels = {'π=[100,10,1] Balanced', 'π=[100,100,100] Weak-hier', ...
+                 'π=[10,10,1] Weak-sense', 'π=[100,1,0.1] Autism-like', ...
+                 'π=[50,50,50] Moderate', 'π=[200,20,2] Strong-sense'};
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.x_rep, ...
-        'DisplayName', sprintf('π=[%d,%d,%d]', test_configs(i,1), test_configs(i,2), test_configs(i,3)));
+        'DisplayName', config_labels{i});
 end
-plot(rb_results{1}.t, rb_results{1}.true_x, 'k--', 'LineWidth', 2);
+plot(rb_results{1}.t, rb_results{1}.true_x, 'k--', 'LineWidth', 2, 'DisplayName', 'True');
 xlabel('Time (s)'); ylabel('Position');
 title('Position Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
@@ -467,9 +470,9 @@ subplot(3,3,2);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.v_rep, ...
-        'DisplayName', sprintf('π=[%d,%d,%d]', test_configs(i,1), test_configs(i,2), test_configs(i,3)));
+        'DisplayName', config_labels{i});
 end
-plot(rb_results{1}.t, rb_results{1}.true_v, 'k--', 'LineWidth', 2);
+plot(rb_results{1}.t, rb_results{1}.true_v, 'k--', 'LineWidth', 2, 'DisplayName', 'True');
 xlabel('Time (s)'); ylabel('Velocity');
 title('Velocity Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
@@ -478,9 +481,9 @@ subplot(3,3,3);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.a_rep, ...
-        'DisplayName', sprintf('π=[%d,%d,%d]', test_configs(i,1), test_configs(i,2), test_configs(i,3)));
+        'DisplayName', config_labels{i});
 end
-plot(rb_results{1}.t, rb_results{1}.true_a, 'k--', 'LineWidth', 2);
+plot(rb_results{1}.t, rb_results{1}.true_a, 'k--', 'LineWidth', 2, 'DisplayName', 'True');
 xlabel('Time (s)'); ylabel('Acceleration');
 title('Acceleration Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
@@ -514,7 +517,7 @@ subplot(3,3,7);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.free_energy, ...
-        'DisplayName', sprintf('π=[%d,%d,%d]', test_configs(i,1), test_configs(i,2), test_configs(i,3)));
+        'DisplayName', config_labels{i});
 end
 xlabel('Time (s)'); ylabel('Free Energy');
 title('Total Free Energy'); legend('Location', 'best', 'FontSize', 7); grid on;
@@ -528,8 +531,8 @@ for i = 1:n_configs
     final_errors(i,3) = abs(rb_results{i}.a_rep(end) - rb_results{i}.true_a(end));
 end
 bar(final_errors);
-set(gca, 'XTickLabel', arrayfun(@(i) sprintf('[%d,%d,%d]', test_configs(i,1), ...
-    test_configs(i,2), test_configs(i,3)), 1:n_configs, 'UniformOutput', false));
+short_labels = {'Balanced', 'Weak-hier', 'Weak-sense', 'Autism-like', 'Moderate', 'Strong-sense'};
+set(gca, 'XTickLabel', short_labels);
 xlabel('Configuration'); ylabel('Final Error');
 title('Final State Errors');
 legend({'Position', 'Velocity', 'Acceleration'}, 'FontSize', 8); grid on;
@@ -552,8 +555,7 @@ for i = 1:n_configs
     end
 end
 bar(adapt_times_rb);
-set(gca, 'XTickLabel', arrayfun(@(i) sprintf('[%d,%d,%d]', test_configs(i,1), ...
-    test_configs(i,2), test_configs(i,3)), 1:n_configs, 'UniformOutput', false));
+set(gca, 'XTickLabel', short_labels);
 xlabel('Configuration'); ylabel('Time (s)');
 title('Adaptation Time (Acceleration)'); grid on;
 xtickangle(45);
@@ -601,6 +603,10 @@ rb_eta_results = cell(1, n_configs);
 
 fprintf('  Testing %d configurations:\n', n_configs);
 
+eta_labels = {'η=[0.05,0.25] Slow', 'η=[0.1,0.5] Balanced', ...
+              'η=[0.2,1.0] Fast', 'η=[0.1,0.1] Error-blind', ...
+              'η=[0.5,0.5] Hyperplastic'};
+
 for i = 1:n_configs
     eta_rep = eta_configs(i, 1);
     eta_err = eta_configs(i, 2);
@@ -625,9 +631,9 @@ subplot(2,3,1);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.v_rep, ...
-        'DisplayName', sprintf('η=[%.2f,%.2f]', eta_configs(i,1), eta_configs(i,2)));
+        'DisplayName', eta_labels{i});
 end
-plot(rb_eta_results{1}.t, rb_eta_results{1}.true_v, 'k--', 'LineWidth', 2);
+plot(rb_eta_results{1}.t, rb_eta_results{1}.true_v, 'k--', 'LineWidth', 2, 'DisplayName', 'True');
 xlabel('Time (s)'); ylabel('Velocity');
 title('Velocity Inference'); legend('Location', 'best'); grid on;
 
@@ -635,9 +641,9 @@ subplot(2,3,2);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.a_rep, ...
-        'DisplayName', sprintf('η=[%.2f,%.2f]', eta_configs(i,1), eta_configs(i,2)));
+        'DisplayName', eta_labels{i});
 end
-plot(rb_eta_results{1}.t, rb_eta_results{1}.true_a, 'k--', 'LineWidth', 2);
+plot(rb_eta_results{1}.t, rb_eta_results{1}.true_a, 'k--', 'LineWidth', 2, 'DisplayName', 'True');
 xlabel('Time (s)'); ylabel('Acceleration');
 title('Acceleration Inference'); legend('Location', 'best'); grid on;
 
@@ -645,7 +651,7 @@ subplot(2,3,3);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.free_energy, ...
-        'DisplayName', sprintf('η=[%.2f,%.2f]', eta_configs(i,1), eta_configs(i,2)));
+        'DisplayName', eta_labels{i});
 end
 xlabel('Time (s)'); ylabel('Free Energy');
 title('Free Energy'); legend('Location', 'best'); grid on;
@@ -674,8 +680,8 @@ for i = 1:n_configs
     v_variance(i) = var(rb_eta_results{i}.v_rep(second_half));
 end
 bar(v_variance);
-set(gca, 'XTickLabel', arrayfun(@(i) sprintf('[%.2f,%.2f]', eta_configs(i,1), ...
-    eta_configs(i,2)), 1:n_configs, 'UniformOutput', false));
+short_eta_labels = {'Slow', 'Balanced', 'Fast', 'Error-blind', 'Hyperplastic'};
+set(gca, 'XTickLabel', short_eta_labels);
 xlabel('Configuration'); ylabel('Variance');
 title('Velocity Stability (2nd Half)'); grid on;
 xtickangle(45);
