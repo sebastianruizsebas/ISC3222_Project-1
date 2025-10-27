@@ -532,7 +532,7 @@ set(gca, 'XTickLabel', arrayfun(@(i) sprintf('[%d,%d,%d]', test_configs(i,1), ..
     test_configs(i,2), test_configs(i,3)), 1:n_configs, 'UniformOutput', false));
 xlabel('Configuration'); ylabel('Final Error');
 title('Final State Errors');
-legend('Position', 'Velocity', 'Acceleration', 'FontSize', 8); grid on;
+legend({'Position', 'Velocity', 'Acceleration'}, 'FontSize', 8); grid on;
 xtickangle(45);
 
 % Adaptation times
