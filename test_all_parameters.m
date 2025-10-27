@@ -570,7 +570,7 @@ text(0.05, 0.80, '\bf Technical:', 'FontSize', 10, 'FontWeight', 'bold');
 text(0.05, 0.70, '• π_x: Trust in sensory input', 'FontSize', 9);
 text(0.05, 0.63, '• π_v: Trust in velocity estimates', 'FontSize', 9);
 text(0.05, 0.56, '• π_a: Trust in acceleration priors', 'FontSize', 9);
-text(0.05, 0.47, 'Higher π = stronger influence', 'FontSize', 9, 'FontStyle', 'italic');
+text(0.05, 0.47, 'Higher π = stronger influence', 'FontSize', 9, 'FontAngle', 'italic');
 
 text(0.05, 0.35, '\bf Psychiatric Relevance:', 'FontSize', 10, 'FontWeight', 'bold');
 text(0.05, 0.25, '• [100,10,1]: Balanced (healthy)', 'FontSize', 9);
@@ -694,7 +694,7 @@ text(0.05, 0.95, '\bf Learning Rate Interpretation', ...
 text(0.05, 0.80, '\bf Technical:', 'FontSize', 10, 'FontWeight', 'bold');
 text(0.05, 0.70, '• η_{rep}: How fast beliefs update', 'FontSize', 9);
 text(0.05, 0.63, '• η_{err}: How fast errors propagate', 'FontSize', 9);
-text(0.05, 0.54, 'Higher η = faster learning but more oscillation', 'FontSize', 9, 'FontStyle', 'italic');
+text(0.05, 0.54, 'Higher η = faster learning but more oscillation', 'FontSize', 9, 'FontAngle', 'italic');
 
 text(0.05, 0.40, '\bf Cognitive Implications:', 'FontSize', 10, 'FontWeight', 'bold');
 text(0.05, 0.30, '• [0.1,0.5]: Balanced (standard)', 'FontSize', 9);
