@@ -448,11 +448,11 @@ for i = 1:n_configs
 end
 
 % Visualize
-figure('Position', [100, 100, 1600, 1000]);
+figure('Position', [100, 100, 1600, 1200]);
 sgtitle('Test 5: Rao & Ballard Precision Weight Effects', 'FontSize', 14, 'FontWeight', 'bold');
 
 % Position representations
-subplot(3,3,1);
+subplot(4,3,1);
 hold on;
 config_labels = {'π=[100,10,1] Balanced', 'π=[100,100,100] Weak-hier', ...
                  'π=[10,10,1] Weak-sense', 'π=[100,1,0.1] Autism-like', ...
@@ -466,7 +466,7 @@ xlabel('Time (s)'); ylabel('Position');
 title('Position Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
 % Velocity representations
-subplot(3,3,2);
+subplot(4,3,2);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.v_rep, ...
@@ -477,7 +477,7 @@ xlabel('Time (s)'); ylabel('Velocity');
 title('Velocity Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
 % Acceleration representations
-subplot(3,3,3);
+subplot(4,3,3);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.a_rep, ...
@@ -488,7 +488,7 @@ xlabel('Time (s)'); ylabel('Acceleration');
 title('Acceleration Representation'); legend('Location', 'best', 'FontSize', 7); grid on;
 
 % Error signals
-subplot(3,3,4);
+subplot(4,3,4);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.err_x);
@@ -496,7 +496,7 @@ end
 xlabel('Time (s)'); ylabel('Error');
 title('Level 1 Error (ε_x)'); grid on;
 
-subplot(3,3,5);
+subplot(4,3,5);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.err_v);
@@ -504,7 +504,7 @@ end
 xlabel('Time (s)'); ylabel('Error');
 title('Level 2 Error (ε_v)'); grid on;
 
-subplot(3,3,6);
+subplot(4,3,6);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.err_a);
@@ -513,7 +513,7 @@ xlabel('Time (s)'); ylabel('Error');
 title('Level 3 Error (ε_a)'); grid on;
 
 % Free energy
-subplot(3,3,7);
+subplot(4,3,7);
 hold on;
 for i = 1:n_configs
     plot(rb_results{i}.t, rb_results{i}.free_energy, ...
@@ -523,7 +523,7 @@ xlabel('Time (s)'); ylabel('Free Energy');
 title('Total Free Energy'); legend('Location', 'best', 'FontSize', 7); grid on;
 
 % Summary metrics
-subplot(3,3,8);
+subplot(4,3,8);
 final_errors = zeros(n_configs, 3);
 for i = 1:n_configs
     final_errors(i,1) = abs(rb_results{i}.x_rep(end) - rb_results{i}.true_x(end));
@@ -539,7 +539,7 @@ legend({'Position', 'Velocity', 'Acceleration'}, 'FontSize', 8); grid on;
 xtickangle(45);
 
 % Adaptation times
-subplot(3,3,9);
+subplot(4,3,9);
 adapt_times_rb = zeros(n_configs, 1);
 for i = 1:n_configs
     change_idx = find(rb_results{i}.t >= 5, 1);
@@ -560,27 +560,26 @@ xlabel('Configuration'); ylabel('Time (s)');
 title('Adaptation Time (Acceleration)'); grid on;
 xtickangle(45);
 
-% Add interpretation text box
-annotation('textbox', [0.02, 0.02, 0.25, 0.12], ...
-    'String', {'\bf Precision Interpretation:', ...
-               '\rm π_x: Trust in sensory input', ...
-               'π_v: Trust in velocity estimates', ...
-               'π_a: Trust in acceleration priors', ...
-               '', ...
-               'Higher π = more precise = stronger influence'}, ...
-    'FontSize', 9, 'BackgroundColor', [1 1 0.9], ...
-    'EdgeColor', 'black', 'LineWidth', 1.5, 'FitBoxToText', 'off');
+% Interpretation text panel
+subplot(4,3,10);
+axis off;
+text(0.05, 0.95, '\bf Precision Weight Interpretation', ...
+    'FontSize', 11, 'FontWeight', 'bold', 'VerticalAlignment', 'top');
 
-annotation('textbox', [0.73, 0.02, 0.25, 0.12], ...
-    'String', {'\bf Psychiatric Relevance:', ...
-               '\rm [100,10,1]: Balanced (healthy)', ...
-               '[100,100,100]: Weak hierarchy', ...
-               '[100,1,0.1]: Over-trust senses', ...
-               '                    (autism-like)', ...
-               '[10,10,1]: Under-trust senses', ...
-               '                (psychosis-like)'}, ...
-    'FontSize', 9, 'BackgroundColor', [0.9 1 0.9], ...
-    'EdgeColor', 'black', 'LineWidth', 1.5, 'FitBoxToText', 'off');
+text(0.05, 0.80, '\bf Technical:', 'FontSize', 10, 'FontWeight', 'bold');
+text(0.05, 0.70, '• π_x: Trust in sensory input', 'FontSize', 9);
+text(0.05, 0.63, '• π_v: Trust in velocity estimates', 'FontSize', 9);
+text(0.05, 0.56, '• π_a: Trust in acceleration priors', 'FontSize', 9);
+text(0.05, 0.47, 'Higher π = stronger influence', 'FontSize', 9, 'FontStyle', 'italic');
+
+text(0.05, 0.35, '\bf Psychiatric Relevance:', 'FontSize', 10, 'FontWeight', 'bold');
+text(0.05, 0.25, '• [100,10,1]: Balanced (healthy)', 'FontSize', 9);
+text(0.05, 0.18, '• [100,100,100]: Weak hierarchy', 'FontSize', 9);
+text(0.05, 0.11, '• [100,1,0.1]: Over-trust senses (autism-like)', 'FontSize', 9);
+text(0.05, 0.04, '• [10,10,1]: Under-trust senses (psychosis-like)', 'FontSize', 9);
+
+% Add border
+rectangle('Position', [0, 0, 1, 1], 'EdgeColor', 'black', 'LineWidth', 2);
 
 saveas(gcf, 'parameter_tests/test5_rao_ballard_precision.png');
 fprintf('  Saved: parameter_tests/test5_rao_ballard_precision.png\n\n');
@@ -624,10 +623,10 @@ for i = 1:n_configs
 end
 
 % Visualize
-figure('Position', [100, 100, 1400, 900]);
+figure('Position', [100, 100, 1400, 1000]);
 sgtitle('Test 6: Learning Rate Effects', 'FontSize', 14, 'FontWeight', 'bold');
 
-subplot(2,3,1);
+subplot(3,3,1);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.v_rep, ...
@@ -637,7 +636,7 @@ plot(rb_eta_results{1}.t, rb_eta_results{1}.true_v, 'k--', 'LineWidth', 2, 'Disp
 xlabel('Time (s)'); ylabel('Velocity');
 title('Velocity Inference'); legend('Location', 'best'); grid on;
 
-subplot(2,3,2);
+subplot(3,3,2);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.a_rep, ...
@@ -647,7 +646,7 @@ plot(rb_eta_results{1}.t, rb_eta_results{1}.true_a, 'k--', 'LineWidth', 2, 'Disp
 xlabel('Time (s)'); ylabel('Acceleration');
 title('Acceleration Inference'); legend('Location', 'best'); grid on;
 
-subplot(2,3,3);
+subplot(3,3,3);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.free_energy, ...
@@ -656,7 +655,7 @@ end
 xlabel('Time (s)'); ylabel('Free Energy');
 title('Free Energy'); legend('Location', 'best'); grid on;
 
-subplot(2,3,4);
+subplot(3,3,4);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.err_v);
@@ -664,7 +663,7 @@ end
 xlabel('Time (s)'); ylabel('Error');
 title('Velocity Error Signal'); grid on;
 
-subplot(2,3,5);
+subplot(3,3,5);
 hold on;
 for i = 1:n_configs
     plot(rb_eta_results{i}.t, rb_eta_results{i}.err_a);
@@ -672,7 +671,7 @@ end
 xlabel('Time (s)'); ylabel('Error');
 title('Acceleration Error Signal'); grid on;
 
-subplot(2,3,6);
+subplot(3,3,6);
 % Stability analysis
 v_variance = zeros(n_configs, 1);
 for i = 1:n_configs
@@ -686,28 +685,26 @@ xlabel('Configuration'); ylabel('Variance');
 title('Velocity Stability (2nd Half)'); grid on;
 xtickangle(45);
 
-% Add interpretation text box
-annotation('textbox', [0.02, 0.02, 0.25, 0.12], ...
-    'String', {'\bf Learning Rate Interpretation:', ...
-               '\rm η_{rep}: How fast beliefs update', ...
-               'η_{err}: How fast errors propagate', ...
-               '', ...
-               'Higher η = faster learning', ...
-               'but more oscillation/instability'}, ...
-    'FontSize', 9, 'BackgroundColor', [1 1 0.9], ...
-    'EdgeColor', 'black', 'LineWidth', 1.5, 'FitBoxToText', 'off');
+% Interpretation text panel
+subplot(3,3,7);
+axis off;
+text(0.05, 0.95, '\bf Learning Rate Interpretation', ...
+    'FontSize', 11, 'FontWeight', 'bold', 'VerticalAlignment', 'top');
 
-annotation('textbox', [0.73, 0.02, 0.25, 0.12], ...
-    'String', {'\bf Cognitive Implications:', ...
-               '\rm [0.1,0.5]: Balanced (standard)', ...
-               '[0.05,0.25]: Slow learner', ...
-               '                   (rigid beliefs)', ...
-               '[0.2,1.0]: Fast learner', ...
-               '                (flexible but noisy)', ...
-               '[0.1,0.1]: Error-blind', ...
-               '[0.5,0.5]: Hyperplastic'}, ...
-    'FontSize', 9, 'BackgroundColor', [0.9 1 0.9], ...
-    'EdgeColor', 'black', 'LineWidth', 1.5, 'FitBoxToText', 'off');
+text(0.05, 0.80, '\bf Technical:', 'FontSize', 10, 'FontWeight', 'bold');
+text(0.05, 0.70, '• η_{rep}: How fast beliefs update', 'FontSize', 9);
+text(0.05, 0.63, '• η_{err}: How fast errors propagate', 'FontSize', 9);
+text(0.05, 0.54, 'Higher η = faster learning but more oscillation', 'FontSize', 9, 'FontStyle', 'italic');
+
+text(0.05, 0.40, '\bf Cognitive Implications:', 'FontSize', 10, 'FontWeight', 'bold');
+text(0.05, 0.30, '• [0.1,0.5]: Balanced (standard)', 'FontSize', 9);
+text(0.05, 0.23, '• [0.05,0.25]: Slow learner (rigid beliefs)', 'FontSize', 9);
+text(0.05, 0.16, '• [0.2,1.0]: Fast learner (flexible but noisy)', 'FontSize', 9);
+text(0.05, 0.09, '• [0.1,0.1]: Error-blind', 'FontSize', 9);
+text(0.05, 0.02, '• [0.5,0.5]: Hyperplastic (unstable)', 'FontSize', 9);
+
+% Add border
+rectangle('Position', [0, 0, 1, 1], 'EdgeColor', 'black', 'LineWidth', 2);
 
 saveas(gcf, 'parameter_tests/test6_rao_ballard_learning.png');
 fprintf('  Saved: parameter_tests/test6_rao_ballard_learning.png\n\n');
