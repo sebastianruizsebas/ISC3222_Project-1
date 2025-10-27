@@ -61,6 +61,31 @@ dv/dt = -∂F/∂v = (x_obs - v) / σ_x² - (v - μ_v) / σ_v²
 
 ## Files in This Project
 
+### Model Classes (Object-Oriented Implementation)
+
+1. **`PredictiveCodingModel.m`** (Base Class)
+   - Abstract base class for two-level predictive coding models
+   - Common functionality: visualization, saving, performance metrics
+   - Properties: time parameters, precision, state variables, histories
+   - Methods: `generateSensoryInput()`, `run()`, `visualize()`, `save()`, `printSummary()`
+
+2. **`EulerModel.m`** (Inherits from PredictiveCodingModel)
+   - Implements Euler integration (fixed-step method)
+   - Simple, explicit forward integration
+   - Good for understanding basic dynamics
+
+3. **`ODE45Model.m`** (Inherits from PredictiveCodingModel)
+   - Implements adaptive Runge-Kutta method (4th/5th order)
+   - High-precision with adaptive time-stepping
+   - Includes phase portrait visualization
+   - Automatically compares with Euler method
+
+4. **`RaoBallardModel.m`** (Standalone Class)
+   - Three-level hierarchical model (position → velocity → acceleration)
+   - Explicit prediction and error units
+   - Separate representations for each hierarchical level
+   - Based on Rao & Ballard (1999) cortical architecture
+
 ### Experiment Scripts
 
 1. **`step1_symbolic_derivation.m`**
@@ -69,7 +94,7 @@ dv/dt = -∂F/∂v = (x_obs - v) / σ_x² - (v - μ_v) / σ_v²
    - Saves symbolic expressions to `symbolic_derivations.mat`
 
 2. **`step2_numerical_simulation.m`**
-   - Implements Euler integration of the dynamics
+   - Creates and runs `EulerModel` instance
    - Simulates response to sudden velocity change (t=5s)
    - Generates 6-subplot figure showing adaptation
    - Saves results to `simulation_results.mat`
@@ -81,23 +106,28 @@ dv/dt = -∂F/∂v = (x_obs - v) / σ_x² - (v - μ_v) / σ_v²
    - Saves results to `prior_comparison_results.mat`
 
 4. **`step4_ode45_version.m`**
-   - High-precision simulation using MATLAB's `ode45` (Runge-Kutta)
-   - Adaptive time-stepping for efficiency
-   - Compares accuracy with Euler method
+   - Creates and runs `ODE45Model` instance
+   - High-precision simulation using adaptive Runge-Kutta
+   - Compares accuracy with `EulerModel`
    - Saves results to `ode45_results.mat`
 
-5. **`run_all_experiments.m`**
-   - Master script to execute all four steps sequentially
-   - Generates summary comparison figure
+5. **`step5_rao_ballard_extension.m`**
+   - Creates and runs `RaoBallardModel` instance
+   - Three-level hierarchical predictive coding
+   - Explicit prediction and error units
+
+6. **`step6_compare_architectures.m`**
+   - Compares two-level (Steps 2-4) vs. three-level (Step 5) architectures
+   - Analyzes prediction error dynamics and free energy
+
+7. **`step7_image_prediction.m`**
+   - Extends to 2D spatial predictions
+   - Image-based predictive coding demonstration
+
+8. **`run_all_experiments.m`**
+   - Master script to execute all steps sequentially
+   - Saves figures to `figures/` directory for remote access
    - **START HERE** for full demonstration
-
-6. **`step5_rao_ballard_extension.m`**
-   - Implements the three-level Rao & Ballard hierarchical model
-   - Compares with original two-level model
-
-7. **`step6_compare_architectures.m`**
-   - Compares results of two-level vs. three-level models
-   - Analyzes prediction error dynamics
 
 ### Output Files (Generated)
 
@@ -105,51 +135,204 @@ dv/dt = -∂F/∂v = (x_obs - v) / σ_x² - (v - μ_v) / σ_v²
 - `simulation_results.mat` - Euler simulation data
 - `prior_comparison_results.mat` - Multi-prior comparison
 - `ode45_results.mat` - High-precision ODE45 data
+- `rao_ballard_results.mat` - Three-level model results
+- `image_prediction_results.mat` - 2D spatial predictions
+- `figures/*.png` - All generated figures saved as PNG files
 
 ---
 
 ## How to Run the Experiments
 
-### Quick Start (Run Everything)
+### Quick Start (Recommended)
+
+Run all experiments and save figures:
 
 ```matlab
-cd 'Project1'
+cd 'c:\Users\srseb\OneDrive\School\FSU\Fall 2025\Symbolic Numeric Computation w Alan Lemmon\Project1'
 run_all_experiments
 ```
 
 This will:
-1. Run all four steps in sequence
-2. Generate all figures
+1. Run all seven steps in sequence
+2. Generate all figures and save them to `figures/` directory
 3. Create all output `.mat` files
-4. Display summary results
+4. Display summary results in console
 
-**Note:** Set `pause_between_steps = false` in `run_all_experiments.m` to run non-interactively.
+**For Remote Terminal Access:**
+- All figures are automatically saved as PNG files in `figures/` directory
+- You can download them after the script completes
+- Figure names: `step1.png`, `step2.png`, `step3.png`, etc.
 
 ### Run Individual Steps
 
+Each step can be run independently:
+
 ```matlab
-% Step 1: See the math
+% Step 1: See the symbolic math derivations
 step1_symbolic_derivation
 
-% Step 2: Basic simulation
+% Step 2: Basic Euler simulation (uses EulerModel class)
 step2_numerical_simulation
 
 % Step 3: Compare priors (psychiatric modeling)
 step3_prior_comparison
 
-% Step 4: High-precision ODE45
+% Step 4: High-precision ODE45 (uses ODE45Model class)
 step4_ode45_version
 
-% Step 5: Rao & Ballard three-level model
+% Step 5: Rao & Ballard three-level model (uses RaoBallardModel class)
 step5_rao_ballard_extension
 
 % Step 6: Compare two-level vs. three-level architectures
 step6_compare_architectures
+
+% Step 7: 2D spatial predictions
+step7_image_prediction
 ```
+
+### Using the Model Classes Directly
+
+The refactored code uses object-oriented programming. You can create and run models programmatically:
+
+#### Example 1: Basic Euler Simulation
+
+```matlab
+% Create model
+model = EulerModel(0.01, 10, 0.1, 1.0);  % dt, T, sigma_x, sigma_v
+
+% Generate sensory input (noise_std)
+model.generateSensoryInput(0.05);
+
+% Run simulation
+model.run();
+
+% Visualize results
+model.visualize();
+
+% Print performance metrics
+model.printSummary();
+
+% Save results
+model.save('my_results.mat');
+```
+
+#### Example 2: High-Precision ODE45
+
+```matlab
+% Create ODE45 model
+model = ODE45Model(0.01, 10, 0.1, 1.0);
+
+% Generate sensory input
+model.generateSensoryInput(0.05);
+
+% Run adaptive Runge-Kutta simulation
+model.run();
+
+% Visualize (includes phase portrait)
+model.visualize();
+
+% Access results
+position = model.x_history;
+velocity = model.v_history;
+errors = model.free_energy;
+```
+
+#### Example 3: Three-Level Rao & Ballard Model
+
+```matlab
+% Create Rao & Ballard model
+% Parameters: dt, T, pi_x, pi_v, pi_a (precision weights)
+model = RaoBallardModel(0.01, 10, 100, 10, 1);
+
+% Generate sensory input
+% Parameters: noise, a_before, a_after, change_time
+model.generateSensoryInput(0.05, 0, -3, 5.0);
+
+% Run three-level hierarchical inference
+model.run();
+
+% Visualize all levels
+model.visualize();
+
+% Print summary
+model.printSummary();
+
+% Access three-level states
+position = model.x_rep;
+velocity = model.v_rep;
+acceleration = model.a_rep;
+```
+
+#### Example 4: Custom Experiment
+
+```matlab
+% Compare different noise levels
+noise_levels = [0.01, 0.05, 0.1];
+results = cell(1, 3);
+
+for i = 1:3
+    model = EulerModel(0.01, 10, 0.1, 1.0);
+    model.generateSensoryInput(noise_levels(i));
+    model.run();
+    results{i} = model;
+end
+
+% Plot comparison
+figure;
+hold on;
+for i = 1:3
+    plot(results{i}.t, results{i}.free_energy, ...
+         'DisplayName', sprintf('Noise = %.2f', noise_levels(i)));
+end
+legend; xlabel('Time (s)'); ylabel('Free Energy');
+title('Effect of Sensory Noise on Free Energy');
+```
+
+### Model Class API Reference
+
+#### Common Methods (PredictiveCodingModel, EulerModel, ODE45Model)
+
+| Method | Description | Parameters |
+|--------|-------------|------------|
+| `generateSensoryInput(noise_std)` | Create synthetic motion data | `noise_std` - sensory noise level |
+| `run()` | Execute simulation | None |
+| `visualize()` | Create standard plots | Optional: custom title |
+| `save(filename)` | Save results to .mat file | `filename` - path to save |
+| `printSummary()` | Display performance metrics | None |
+
+#### RaoBallardModel Methods
+
+| Method | Description | Parameters |
+|--------|-------------|------------|
+| `generateSensoryInput(noise, a_before, a_after, t_change)` | Create motion with acceleration change | 4 parameters for acceleration profile |
+| `run()` | Execute three-level inference | None |
+| `visualize()` | Create 9-subplot hierarchy figure | None |
+| `save(filename)` | Save all levels to .mat | `filename` |
+| `printSummary()` | Display three-level metrics | None |
 
 ---
 
 ## Understanding the Results
+
+### Architecture Overview
+
+The project now uses an **object-oriented design** with three main model classes:
+
+```
+PredictiveCodingModel (Base Class)
+├── EulerModel          (Step 2: Fixed-step integration)
+├── ODE45Model          (Step 4: Adaptive Runge-Kutta)
+└── [Common methods: visualize, save, printSummary]
+
+RaoBallardModel (Standalone)
+└── (Step 5: Three-level hierarchical inference)
+```
+
+**Benefits of Class-Based Design:**
+- ✅ Modular and reusable code
+- ✅ Consistent interface across methods
+- ✅ Easy to extend and customize
+- ✅ Less code duplication (~60% reduction in script length)
 
 ### Step 1: Symbolic Derivation
 
@@ -164,7 +347,11 @@ The system minimizes free energy by balancing:
 
 ---
 
-### Step 2: Numerical Simulation
+### Step 2: Numerical Simulation (EulerModel)
+
+**Implementation:**
+- Uses `EulerModel` class with fixed-step Euler integration
+- Object-oriented approach makes code cleaner and more maintainable
 
 **Experiment setup:**
 - Target moves at velocity +2 for 5 seconds
@@ -185,6 +372,14 @@ The system minimizes free energy by balancing:
 - Infers hidden velocity (not directly observed!)
 - Adapts when velocity changes at t=5s
 - Free energy spike at change, then decreases
+
+**Code example:**
+```matlab
+model = EulerModel(0.01, 10, 0.1, 1.0);
+model.generateSensoryInput(0.05);
+model.run();
+model.visualize();
+```
 
 ---
 
@@ -234,7 +429,12 @@ Psychiatric conditions may arise from imbalanced priors—too strong or too weak
 
 ---
 
-### Step 4: ODE45 High-Precision
+### Step 4: ODE45 High-Precision (ODE45Model)
+
+**Implementation:**
+- Uses `ODE45Model` class with adaptive Runge-Kutta method
+- Automatically compares with `EulerModel` for validation
+- Includes dynamics method for ODE solver integration
 
 **Why ODE45?**
 - Adaptive Runge-Kutta method (4th/5th order)
@@ -249,16 +449,29 @@ Psychiatric conditions may arise from imbalanced priors—too strong or too weak
 3. **Phase portrait**: Trajectory in (x, v) space
 4. **Position error**: Log-scale tracking error
 5. **Velocity error**: Inference accuracy
-6. **Adaptive steps**: How ODE45 adjusts dt
+6. **Free energy**: Minimization over time
 
 **Comparison with Euler:**
+- Automatically creates `EulerModel` for comparison
 - Reports max and RMS differences
 - ODE45 typically more accurate by 2-3 orders of magnitude
-- Fewer time steps needed (adaptive)
+- Fewer adaptive time steps needed
+
+**Code example:**
+```matlab
+model = ODE45Model(0.01, 10, 0.1, 1.0);
+model.generateSensoryInput(0.05);
+model.run();  % Adaptive integration
+model.visualize();  % Includes phase portrait
+```
 
 ---
 
-### Step 5: Rao & Ballard Extension
+### Step 5: Rao & Ballard Extension (RaoBallardModel)
+
+**Implementation:**
+- Uses standalone `RaoBallardModel` class
+- Different architecture from base predictive coding (separate error/prediction units)
 
 **New in this step:**
 - Three-level hierarchical model (position → velocity → acceleration)
@@ -266,11 +479,17 @@ Psychiatric conditions may arise from imbalanced priors—too strong or too weak
 - Separate learning rates for representations vs. errors
 - Cascading inference through multiple levels
 
-**Run:**
-```matlab
-step5_rao_ballard_extension
-step6_compare_architectures
-```
+**What you'll see (9 subplots):**
+
+1. **Position representation**: Level 1 inference
+2. **Velocity representation**: Level 2 inference
+3. **Acceleration representation**: Level 3 inference
+4. **Sensory error**: ε_x (bottom-up)
+5. **Velocity error**: ε_v (middle level)
+6. **Acceleration error**: ε_a (top-down)
+7. **Predictions**: Top-down signals
+8. **Free energy**: Total model evidence
+9. **Architecture diagram**: Information flow visualization
 
 **Key architectural differences:**
 
@@ -281,11 +500,37 @@ step6_compare_architectures
 | **Levels** | 2 (x, v) | 3 (x, v, a) |
 | **Neural realism** | Abstract | Closer to cortex |
 | **Computation** | Gradient descent | Error propagation |
+| **Base class** | PredictiveCodingModel | Standalone |
+
+**Code example:**
+```matlab
+model = RaoBallardModel(0.01, 10, 100, 10, 1);
+model.generateSensoryInput(0.05, 0, -3, 5.0);
+model.run();
+model.visualize();  % 9-panel figure
+```
 
 **Applications:**
 - Visual cortex modeling (V1 → V2 → MT hierarchy)
 - Demonstrates cortical microcircuit structure
 - Canonical computation across brain regions
+
+---
+
+### Step 6: Compare Architectures
+
+Compares the two-level free energy model (Steps 2-4) with the three-level Rao & Ballard model (Step 5):
+- Loads saved results from both approaches
+- Analyzes prediction errors and adaptation dynamics
+- Highlights architectural trade-offs
+
+---
+
+### Step 7: Image Prediction
+
+Extends the 1D motion model to 2D spatial predictions:
+- Demonstrates how predictive coding scales to images
+- Shows prediction error patterns in spatial domain
 
 ---
 
@@ -347,41 +592,64 @@ $$\frac{dv}{dt} = \frac{x_{obs} - v}{\sigma_x^2} - \frac{v - \mu_v}{\sigma_v^2}$
 ## Extensions & Future Work
 
 ### Implemented (in this project):
-✅ Two-level hierarchy  
+✅ Two-level hierarchy with class-based design  
+✅ Three-level Rao & Ballard architecture  
 ✅ Continuous sensory input  
 ✅ Prior strength comparison  
 ✅ Psychiatric modeling interpretation  
-✅ Multiple integration methods  
+✅ Multiple integration methods (Euler, ODE45)  
+✅ Object-oriented design for modularity  
+✅ Remote terminal support (auto-save figures)  
+✅ 2D spatial predictions  
+
+### Code Architecture Improvements:
+✅ **Base class pattern** - `PredictiveCodingModel` provides common functionality  
+✅ **Inheritance** - `EulerModel` and `ODE45Model` extend base class  
+✅ **Encapsulation** - Model state and methods bundled together  
+✅ **Reusability** - Models can be instantiated multiple times  
+✅ **Maintainability** - ~60% reduction in code duplication  
 
 ### Possible Extensions:
 
-1. **Three-level hierarchy**
-   - Add acceleration inference
-   - Test deeper hierarchical effects
+1. **Additional Integration Methods**
+   - Implement RK4 (4th-order Runge-Kutta) as another subclass
+   - Stochastic differential equation (SDE) solvers
+   - Implicit methods for stiff systems
 
-2. **Stochastic dynamics**
-   - Add process noise to velocity
-   - Use stochastic differential equations (SDEs)
+2. **Parameter Optimization**
+   - Add `fitParameters()` method to estimate σ_x, σ_v from data
+   - Bayesian parameter estimation
+   - Cross-validation for model selection
 
-3. **Active inference**
-   - Add motor actions
-   - System controls sensory input to minimize surprise
+3. **Active Inference**
+   - Add motor actions to control sensory input
+   - Extend models to minimize surprise through action
+   - Implement action selection policies
 
-4. **Real sensory data**
-   - Replace synthetic motion with real visual tracking
-   - Import eye-tracking or mouse-tracking data
+4. **Real Sensory Data**
+   - Load eye-tracking or mouse-tracking data
+   - Fit models to empirical trajectories
+   - Validate against human behavioral experiments
 
-5. **Parameter fitting**
-   - Fit σ_x, σ_v to real behavioral data
-   - Use Bayesian inference for parameter estimation
+5. **Deeper Hierarchies**
+   - Extend to 4+ levels
+   - Test scalability of inference
+   - Compare computational efficiency
 
-6. **Alternative priors**
-   - Non-Gaussian priors (Laplacian, mixture models)
-   - Time-varying priors (context-dependent)
+6. **Alternative Priors**
+   - Non-Gaussian priors (Laplacian, Student-t)
+   - Mixture model priors
+   - Time-varying context-dependent priors
 
-7. **Psychiatric model validation**
-   - Compare with clinical datasets
+7. **Clinical Applications**
+   - Fit models to patient data
    - Predict behavioral phenotypes
+   - Test intervention strategies
+
+8. **Performance Optimization**
+   - GPU acceleration for large-scale simulations
+   - Parallel execution of multiple models
+   - C++ MEX implementations for speed
 
 ---
 
@@ -447,17 +715,52 @@ Minimizing weighted prediction errors provides a unified framework for:
 ### "Symbolic Math Toolbox required"
 **Solution:** Step 1 requires this toolbox. If not available, the derived equations are already implemented in Steps 2-4, so you can skip Step 1.
 
-### "Figures not appearing"
-**Solution:** Check `close all` commands. Remove or use `figure; ...` to create new figures.
+### "Undefined function or variable 'EulerModel'"
+**Solution:** Make sure all `.m` class files are in your MATLAB path. Navigate to the project directory first:
+```matlab
+cd 'c:\Users\srseb\OneDrive\School\FSU\Fall 2025\Symbolic Numeric Computation w Alan Lemmon\Project1'
+```
+
+### "Figures not appearing" (Remote Terminal)
+**Solution:** If running via SSH/remote terminal, figures are automatically saved to `figures/` directory. Check there for PNG files instead of expecting display windows.
 
 ### "Out of memory"
-**Solution:** Reduce simulation time (`t_span`) or increase time step (`dt`).
+**Solution:** Reduce simulation time (`T`) or increase time step (`dt`) when creating models:
+```matlab
+model = EulerModel(0.05, 5, 0.1, 1.0);  % Larger dt, shorter T
+```
 
 ### "Results look different each run"
-**Solution:** Sensory noise is random. Set `rng(seed)` at start for reproducibility.
+**Solution:** Sensory noise is random. Set random seed for reproducibility:
+```matlab
+rng(42);  % Fixed seed
+model = EulerModel(0.01, 10, 0.1, 1.0);
+model.generateSensoryInput(0.05);
+```
 
-### "Adaptation time = inf"
-**Solution:** Prior too strong (σ_v too small) or threshold too strict. Adjust parameters.
+### "Adaptation time = inf" or NaN
+**Solution:** Prior too strong (σ_v too small) or threshold too strict. Adjust parameters or check the `printSummary()` output for details.
+
+### "Class not found" after editing
+**Solution:** MATLAB caches class definitions. Clear classes and reload:
+```matlab
+clear classes
+step2_numerical_simulation  % Re-run
+```
+
+### "Figure directory not created"
+**Solution:** The `run_all_experiments.m` script creates `figures/` automatically. If running steps individually, create it manually:
+```matlab
+if ~exist('figures', 'dir')
+    mkdir('figures');
+end
+```
+
+### Performance Issues
+**Solution:** For faster execution:
+- Use ODE45 with larger tolerances: `odeset('RelTol', 1e-3, 'AbsTol', 1e-5)`
+- Reduce simulation duration: `T = 5` instead of `T = 10`
+- Increase time step for Euler: `dt = 0.05` instead of `dt = 0.01`
 
 ---
 
