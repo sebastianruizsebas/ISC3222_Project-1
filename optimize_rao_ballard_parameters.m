@@ -34,14 +34,14 @@ fprintf('╚══════════════════════�
 % OPTIMIZATION CONFIGURATION
 % ====================================================================
 
-num_trials = 2000;  % Number of random parameter sets to test
+num_trials = 700;  % Number of random parameter sets to test
 
 % Define the search space for each parameter.
 % Learning rates are sampled on a log scale, which is standard practice.
 param_space = struct();
 param_space.eta_rep     = struct('log_min', -4, 'log_max', -1);   % Search 10^-4 to 10^-1 (0.0001 to 0.1)
-param_space.eta_W       = struct('log_min', -6, 'log_max', -2);   % Search 10^-6 to 10^-2 (0.000001 to 0.01)
-param_space.momentum    = struct('min', 0.80, 'max', 0.98);       % Search 0.80 to 0.98
+param_space.eta_W       = struct('log_min', -6, 'log_max', -1);   % Search 10^-6 to 10^-1 (0.000001 to 0.1)
+param_space.momentum    = struct('min', 0.70, 'max', 0.98);       % Search 0.80 to 0.98
 % Note: weight_decay and other architecture parameters are NOT optimized
 % They have theoretical justification and are kept fixed
 
