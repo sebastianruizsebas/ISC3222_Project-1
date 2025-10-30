@@ -15,7 +15,7 @@ fprintf('╚══════════════════════�
 
 % --- 1. Load the most recent optimization results file ---
 fprintf('Searching for optimization results file...\n');
-result_files = dir('optimization_results_3D_2025-10-30_12-46-29.mat');
+result_files = dir('./optimization_results/rao_ballard_3D_optimization_*.mat');
 
 if isempty(result_files)
     error('No optimization results file found. Please run "optimize_rao_ballard_parameters.m" first.');

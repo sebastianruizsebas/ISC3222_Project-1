@@ -1,15 +1,36 @@
 % filepath: c:\Users\srseb\OneDrive\School\FSU\Fall 2025\Symbolic Numeric Computation w Alan Lemmon\Project1\optimize_rao_ballard_parameters.m
 %
-% PARAMETER OPTIMIZATION FOR 2D RAO & BALLARD MODEL
-% ===================================================
+% PARAMETER OPTIMIZATION FOR 3D RAO & BALLARD MODEL - RANDOM SEARCH
+% ==================================================================
 %
-% This script performs a random search to find the optimal set of
-% hyperparameters for the hierarchical_motion_inference_2D_EXACT model.
+% ⚠️  DEPRECATED: See optimize_rao_ballard_pso.m for improved optimization!
 %
-% It aims to minimize a weighted combination of position, velocity,
-% and acceleration errors.
+% This script performs a RANDOM SEARCH to find the optimal set of
+% hyperparameters for the hierarchical_motion_inference_3D_EXACT model.
 %
-% METHOD:
+% NOTE: For better efficiency, use Particle Swarm Optimization (PSO):
+%   >> optimize_rao_ballard_pso.m
+%
+% PSO typically finds better parameters in fewer evaluations by using
+% particle social intelligence and swarm dynamics.
+%
+% This random search method:
+% - METHOD: Random parameter sampling
+% - ADVANTAGES: Simple, embarrassingly parallel, unbiased exploration
+% - DISADVANTAGES: Slower convergence, many wasted evaluations
+% - USE CASE: Quick exploration, sanity checking
+%
+% PSO method (recommended):
+% - METHOD: Particle swarm with velocity/position updates
+% - ADVANTAGES: Faster convergence, efficient exploration/exploitation
+% - DISADVANTAGES: More tuning, can get stuck in local minima
+% - USE CASE: Production optimization, final parameter tuning
+%
+% Comparison:
+%   Random Search: 500 trials, only ~2 unique scores found
+%   PSO: 20 particles × 30 iterations = 600 trials, but converges faster
+%
+% RANDOM SEARCH PROCEDURE:
 %   1. Define a search space for key parameters (learning rates, momentum).
 %   2. Run a specified number of trials.
 %   3. In each trial, randomly sample parameters from the search space.
