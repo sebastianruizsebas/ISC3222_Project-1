@@ -39,11 +39,13 @@ fprintf('  Total model evaluations: %d\n\n', total_evals);
 w = 0.7;        % Inertia weight (controls momentum of particles)
 c1 = 1.5;       % Cognitive parameter (attraction to particle's best)
 c2 = 1.5;       % Social parameter (attraction to swarm's best)
+noise_scale = 0.05;  % Noise scale for stochastic perturbations (5% of parameter range)
 
 fprintf('PSO HYPERPARAMETERS:\n');
 fprintf('  Inertia weight (w): %.2f\n', w);
 fprintf('  Cognitive parameter (c1): %.2f\n', c1);
-fprintf('  Social parameter (c2): %.2f\n\n', c2);
+fprintf('  Social parameter (c2): %.2f\n', c2);
+fprintf('  Noise scale (stochastic exploration): %.2f\n\n', noise_scale);
 
 % ====================================================================
 % DEFINE SEARCH SPACE FOR PARAMETERS
@@ -81,28 +83,38 @@ fprintf('  Position RMSE:                 %.1f\n\n', objective_weights.position_
 % ====================================================================
 
 fprintf('═══════════════════════════════════════════════════════════════\n');
-fprintf('Initializing particle swarm...\n\n');
+fprintf('Initializing particle swarm with SPREAD-OUT initialization...\n\n');
 
-% Initialize particle positions (random within bounds)
+% Initialize particle positions (SPREAD OUT across entire parameter space)
 particles = struct();
 for p = 1:num_particles
-    % Sample on log scale for learning rates
-    log_eta_rep = param_bounds.eta_rep.log_min + ...
-        rand() * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min);
+    % Use Latin hypercube or stratified sampling for better spread
+    % Divide parameter space into cells for each particle
+    
+    % eta_rep: spread particles across log scale
+    log_eta_rep_min = param_bounds.eta_rep.log_min;
+    log_eta_rep_max = param_bounds.eta_rep.log_max;
+    log_eta_rep_cell = log_eta_rep_min + (p-1) * (log_eta_rep_max - log_eta_rep_min) / num_particles;
+    log_eta_rep = log_eta_rep_cell + rand() * (log_eta_rep_max - log_eta_rep_min) / num_particles;
     particles(p).eta_rep = 10^log_eta_rep;
     
-    log_eta_W = param_bounds.eta_W.log_min + ...
-        rand() * (param_bounds.eta_W.log_max - param_bounds.eta_W.log_min);
+    % eta_W: spread particles across log scale
+    log_eta_W_min = param_bounds.eta_W.log_min;
+    log_eta_W_max = param_bounds.eta_W.log_max;
+    log_eta_W_cell = log_eta_W_min + (p-1) * (log_eta_W_max - log_eta_W_min) / num_particles;
+    log_eta_W = log_eta_W_cell + rand() * (log_eta_W_max - log_eta_W_min) / num_particles;
     particles(p).eta_W = 10^log_eta_W;
     
-    % Sample momentum on linear scale
-    particles(p).momentum = param_bounds.momentum.min + ...
-        rand() * (param_bounds.momentum.max - param_bounds.momentum.min);
+    % momentum: spread particles linearly
+    mom_min = param_bounds.momentum.min;
+    mom_max = param_bounds.momentum.max;
+    mom_cell = mom_min + (p-1) * (mom_max - mom_min) / num_particles;
+    particles(p).momentum = mom_cell + rand() * (mom_max - mom_min) / num_particles;
     
     % Fixed parameter
     particles(p).weight_decay = 0.98;
     
-    % Initialize velocity (random, typically in [-1, 1] * parameter_range)
+    % Initialize velocity with larger range for exploration
     particles(p).vel_eta_rep = -2 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min) + ...
         rand() * 4 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min);
     particles(p).vel_eta_W = -2 * (param_bounds.eta_W.log_max - param_bounds.eta_W.log_min) + ...
@@ -121,7 +133,8 @@ end
 global_best_score = inf;
 global_best_params = struct();
 
-fprintf('Swarm initialized with %d particles.\n\n', num_particles);
+fprintf('Swarm initialized with %d SPREAD-OUT particles.\n', num_particles);
+fprintf('Particles distributed across entire parameter space (stratified sampling).\n\n');
 
 % ====================================================================
 % PSO MAIN LOOP
@@ -164,8 +177,9 @@ for iteration = 1:num_iterations
             old_visible = get(0, 'DefaultFigureVisible');
             set(0, 'DefaultFigureVisible', 'off');
             
-            % Run the 3D model with parameters passed as struct
-            hierarchical_motion_inference_3D_EXACT(current_params);
+            % Run the 3D model with parameters and NO plotting (for speed)
+            % Call signature: hierarchical_motion_inference_3D_EXACT(params, make_plots)
+            hierarchical_motion_inference_3D_EXACT(current_params, false);
             
             % Restore visibility
             set(0, 'DefaultFigureVisible', old_visible);
@@ -258,32 +272,41 @@ for iteration = 1:num_iterations
     fprintf('    Best particle:      %.6f\n', min(iteration_scores));
     
     % --- UPDATE PARTICLE VELOCITIES AND POSITIONS ---
-    fprintf('\n  Updating particle positions and velocities...\n\n');
+    fprintf('\n  Updating particle positions and velocities with stochastic noise...\n\n');
     
     for p = 1:num_particles
-        % Velocity update equation (standard PSO):
-        % v = w*v + c1*r1*(pbest - x) + c2*r2*(gbest - x)
+        % Velocity update equation (standard PSO with stochastic noise):
+        % v = w*v + c1*r1*(pbest - x) + c2*r2*(gbest - x) + noise
         
         % eta_rep (log scale)
         r1 = rand();
         r2 = rand();
+        eta_rep_range = param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min;
+        noise_eta_rep = noise_scale * eta_rep_range * randn();
         particles(p).vel_eta_rep = w * particles(p).vel_eta_rep + ...
             c1 * r1 * (log10(particles(p).best_eta_rep) - log10(particles(p).eta_rep)) + ...
-            c2 * r2 * (log10(global_best_params.eta_rep) - log10(particles(p).eta_rep));
+            c2 * r2 * (log10(global_best_params.eta_rep) - log10(particles(p).eta_rep)) + ...
+            noise_eta_rep;
         
         % eta_W (log scale)
         r1 = rand();
         r2 = rand();
+        eta_W_range = param_bounds.eta_W.log_max - param_bounds.eta_W.log_min;
+        noise_eta_W = noise_scale * eta_W_range * randn();
         particles(p).vel_eta_W = w * particles(p).vel_eta_W + ...
             c1 * r1 * (log10(particles(p).best_eta_W) - log10(particles(p).eta_W)) + ...
-            c2 * r2 * (log10(global_best_params.eta_W) - log10(particles(p).eta_W));
+            c2 * r2 * (log10(global_best_params.eta_W) - log10(particles(p).eta_W)) + ...
+            noise_eta_W;
         
         % momentum (linear scale)
         r1 = rand();
         r2 = rand();
+        momentum_range = param_bounds.momentum.max - param_bounds.momentum.min;
+        noise_momentum = noise_scale * momentum_range * randn();
         particles(p).vel_momentum = w * particles(p).vel_momentum + ...
             c1 * r1 * (particles(p).best_momentum - particles(p).momentum) + ...
-            c2 * r2 * (global_best_params.momentum - particles(p).momentum);
+            c2 * r2 * (global_best_params.momentum - particles(p).momentum) + ...
+            noise_momentum;
         
         % Position update
         % For log-scale parameters, position is updated on log scale then converted

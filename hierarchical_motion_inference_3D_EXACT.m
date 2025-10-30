@@ -1,10 +1,18 @@
-function [] = hierarchical_motion_inference_3D_EXACT(params)
+function [] = hierarchical_motion_inference_3D_EXACT(params, make_plots)
     % Wrapper function to accept optional parameters from optimizer
     % Usage:
-    %   hierarchical_motion_inference_3D_EXACT()           % Run with defaults
-    %   hierarchical_motion_inference_3D_EXACT(params)     % Run with custom params
+    %   hierarchical_motion_inference_3D_EXACT()                    % Run with defaults, make plots
+    %   hierarchical_motion_inference_3D_EXACT(params)              % Run with custom params, make plots
+    %   hierarchical_motion_inference_3D_EXACT(params, true)        % Run with custom params, make plots
+    %   hierarchical_motion_inference_3D_EXACT(params, false)       % Run with custom params, NO plots (for optimization)
     %
     % params structure: struct with fields eta_rep, eta_W, momentum, weight_decay
+    % make_plots: boolean (default true), whether to generate summary plots
+    
+    % Default: make plots unless explicitly disabled
+    if nargin < 2
+        make_plots = true;
+    end
     
     if nargin > 0 && isstruct(params)
         % Override defaults with provided parameters
@@ -588,9 +596,14 @@ catch ME
 end
 
 % Create simple 2D plots instead of 3D (much faster in batch mode)
-fprintf('Creating 2D summary plots...\n');
+if make_plots
+    fprintf('Creating 2D summary plots...\n');
+else
+    fprintf('Skipping plot generation (make_plots=false)\n');
+end
 
-fig = figure('Position', [100, 100, 1400, 800], 'Visible', 'off');
+if make_plots
+    fig = figure('Position', [100, 100, 1400, 800], 'Visible', 'off');
 
 colors = {'r', 'g', 'b', 'm'};
 
@@ -662,6 +675,7 @@ catch ME
 end
 
 close(fig);
+end  % End of if make_plots
 
 % ====================================================================
 % ANALYSIS SUMMARY (3D Multi-Trial)
