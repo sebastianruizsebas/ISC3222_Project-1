@@ -593,9 +593,11 @@ for i = 1:N-1
     dW_L2 = -(eta_W * pi_L2 / layer_scale_L2) * (E_L2(i,:)' * R_L3(i,:));
     W_L2_from_L3 = W_L2_from_L3 + dW_L2;
     
-    % Weight regularization
-    W_L1_from_L2 = W_L1_from_L2 * weight_decay;
-    W_L2_from_L3 = W_L2_from_L3 * weight_decay;
+    % GENTLE regularization: Apply very light decay per-step (0.9995)
+    % This prevents weight explosion without killing learning
+    % Stronger decay happens at phase boundaries (decay_L2_goal, decay_L1_motor)
+    W_L1_from_L2 = W_L1_from_L2 * 0.9995;
+    W_L2_from_L3 = W_L2_from_L3 * 0.9995;
     
     learning_trace_W(i) = norm(dW_L1, 'fro') + norm(dW_L2, 'fro');
     
@@ -619,49 +621,42 @@ for i = 1:N-1
     end
     
     % ====================================================================
-    % COMPUTE DYNAMIC PRECISIONS (UPDATED - Now Truly Dynamic)
+    % COMPUTE DYNAMIC PRECISIONS - Responsive Version
     % ====================================================================
-    % Precision represents confidence in predictions
-    % Higher error magnitude → Lower precision (less confident)
-    % Lower error magnitude → Higher precision (more confident)
-    % 
-    % Key insight: Precision should respond to CURRENT error magnitude,
-    % not just variance. This ensures precision adapts immediately when
-    % learning conditions change (e.g., phase transitions).
+    % Precision responds immediately to current error, with memory of history
     
-    epsilon = 0.001;  % Small epsilon to prevent division by zero
+    epsilon = 0.001;
     
-    % Use mean absolute error as primary signal (more responsive than variance)
     if length(L1_error_history) > 10
-        L1_mean_error = mean(L1_error_history);
+        % Current error magnitude (immediate response)
+        L1_current_error = L1_error_history(end);
+        
+        % Historical variance (stability)
         L1_error_var = var(L1_error_history);
         
-        % Dynamic precision formula: responds to both mean error AND variance
-        % When error is large OR inconsistent → low precision
-        % When error is small AND consistent → high precision
-        pi_L1 = pi_L1_base / (1 + L1_mean_error + L1_error_var / epsilon);
-        pi_L1 = max(1, min(1000, pi_L1));  % Keep in reasonable bounds
+        % Precision formula: high current error → low precision
+        % But also consider variance to avoid noise sensitivity
+        pi_L1 = pi_L1_base / (1 + 0.8 * L1_current_error + 0.2 * L1_error_var / epsilon);
+        pi_L1 = max(1, min(1000, pi_L1));
     else
         pi_L1 = pi_L1_base;
     end
     
     if length(L2_error_history) > 10
-        L2_mean_error = mean(L2_error_history);
+        L2_current_error = L2_error_history(end);
         L2_error_var = var(L2_error_history);
         
-        % When L2 errors are near-zero, precision stays high (confident)
-        % When L2 errors grow, precision decreases (less confident, try harder)
-        pi_L2 = pi_L2_base / (1 + L2_mean_error + L2_error_var / epsilon);
+        pi_L2 = pi_L2_base / (1 + 0.8 * L2_current_error + 0.2 * L2_error_var / epsilon);
         pi_L2 = max(0.1, min(100, pi_L2));
     else
         pi_L2 = pi_L2_base;
     end
     
     if length(L3_error_history) > 10
-        L3_mean_error = mean(L3_error_history);
+        L3_current_error = L3_error_history(end);
         L3_error_var = var(L3_error_history);
         
-        pi_L3 = pi_L3_base / (1 + L3_mean_error + L3_error_var / epsilon);
+        pi_L3 = pi_L3_base / (1 + 0.8 * L3_current_error + 0.2 * L3_error_var / epsilon);
         pi_L3 = max(0.01, min(10, pi_L3));
     else
         pi_L3 = pi_L3_base;
@@ -680,8 +675,14 @@ for i = 1:N-1
         L1_current = sqrt(sum(E_L1(i,:).^2));
         L2_current = sqrt(sum(E_L2(i,:).^2));
         
-        fprintf('  Step %d: π=[%.2f,%.2f,%.2f] | Mean Err: L1=%.4f L2=%.4f L3=%.4f | Var: L1=%.6f L2=%.6f L3=%.6f | Current: L1=%.4f L2=%.4f\n', ...
-            i, pi_L1, pi_L2, pi_L3, L1_avg_err, L2_avg_err, L3_avg_err, L1_var_err, L2_var_err, L3_var_err, L1_current, L2_current);
+        % Diagnostic: Check that weights aren't decaying to zero
+        W1_norm = norm(W_L1_from_L2, 'fro');
+        W2_norm = norm(W_L2_from_L3, 'fro');
+        coupling_test = E_L1(i,:) * W_L1_from_L2;
+        coupling_norm = norm(coupling_test);
+        
+        fprintf('  Step %d: π=[%.2f,%.2f,%.2f] | Errors: L1=%.4f L2=%.4f L3=%.4f | W_norms: W1=%.4f W2=%.4f | coupling=%.4f\n', ...
+            i, pi_L1, pi_L2, pi_L3, L1_current, L2_current, L3_avg_err, W1_norm, W2_norm, coupling_norm);
     end
 end  % End main loop
 
