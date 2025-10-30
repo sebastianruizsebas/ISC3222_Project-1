@@ -25,9 +25,9 @@ fprintf('╚══════════════════════�
 num_particles = 20;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 20;  % Each iteration = all particles tested
+num_iterations = 30;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 400 trials
+% Total evaluations will be: num_particles * num_iterations = 600 trials
 total_evals = num_particles * num_iterations;
 
 fprintf('PSO CONFIGURATION:\n');
@@ -254,7 +254,7 @@ iteration_history.best_params_history = [];
 % Quick debug mode: when true, PSO runs use short trials (fast) so you can validate
 % the optimization loop without waiting for full-length simulations. Set to false
 % to run the full-duration model during PSO (much slower).
-fast_debug_mode = true;    % <-- set to false for full/production PSO runs
+fast_debug_mode = false;    % <-- set to false for full/production PSO runs
 debug_T_per_trial = 2.5;   % seconds per trial for fast debug mode (2.5s -> ~250 steps at dt=0.01)
 debug_dt = 0.02;           % larger dt for faster debug runs
 
