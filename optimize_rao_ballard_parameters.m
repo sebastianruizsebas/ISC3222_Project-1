@@ -34,7 +34,7 @@ fprintf('╚══════════════════════�
 % OPTIMIZATION CONFIGURATION
 % ====================================================================
 
-num_trials = 50;  % Number of random parameter sets to test (reduced for testing)
+num_trials = 500;  % Number of random parameter sets to test (comprehensive search)
 
 % Define the search space for each parameter.
 % Learning rates are sampled on a log scale, which is standard practice.
