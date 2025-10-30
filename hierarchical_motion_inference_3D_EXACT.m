@@ -428,11 +428,15 @@ for i = 1:N-1
     
     % Error-driven goal update: minimize motor prediction error
     % If E_L2 is large, it means L3's prediction doesn't match actual L2
-    % So update L3 to better match the errors
-    E_L3_from_motor = E_L2(i,:) * W_L2_from_L3';  % Back-project motor error to goal space
+    % Back-project motor error to goal space via weight matrix transpose
+    % W_L2_from_L3 is [6 x 4], so W_L2_from_L3' is [4 x 6]
+    % E_L2 is [1 x 6], so E_L2 * inv(W_L2_from_L3') gives goal correction
+    
+    % Simple approach: average the motor error to goal space
+    E_L3_from_motor = mean(E_L2(i,:)) * ones(1, 3);  % Scalar error projected to 3D goal
     
     % Update L3 position to reduce motor errors
-    goal_correction = E_L3_from_motor(1:3) * 0.2;  % How much to move goal
+    goal_correction = E_L3_from_motor * 0.1;  % How much to move goal
     R_L3(i+1, 1:3) = R_L3(i, 1:3) + eta_rep * goal_correction;
     
     % Soft constraint: pull L3 toward task target (doesn't fully clamp it)
