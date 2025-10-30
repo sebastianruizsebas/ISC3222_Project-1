@@ -6,10 +6,18 @@ fprintf('╚══════════════════════�
 % ====================================================================
 % BATCH MODE SETUP
 % ====================================================================
+% Check if we're running from optimizer (suppress output)
+if ~exist('optimizer_mode', 'var')
+    optimizer_mode = false;
+end
+
 % Disable graphics for SSH/batch execution
 set(0, 'DefaultFigureVisible', 'off');
 set(groot, 'defaultFigureCreateFcn', @(fig, ~) set(fig, 'Visible', 'off'));
-fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
+
+if ~optimizer_mode
+    fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
+end
 
 % ====================================================================
 % 3D REACHING TASK CONFIGURATION
@@ -128,10 +136,20 @@ fprintf('  Workspace: x,y,z ∈ [%.2f, %.2f] meters\n\n', workspace_bounds(1,1),
 % LEARNING PARAMETERS
 % ====================================================================
 
-eta_rep = 0.005;         % Representation learning rate (increased from 0.001)
-eta_W = 0.0005;          % Weight matrix learning rate (increased from 0.0001)
-momentum = 0.90;         % Momentum for representation updates (decreased for faster learning)
-weight_decay = 0.98;     % L2 regularization on weights (decreased for faster learning)
+% Allow parameters to be overridden by optimizer
+if ~exist('eta_rep', 'var')
+    eta_rep = 0.005;         % Representation learning rate (default)
+end
+if ~exist('eta_W', 'var')
+    eta_W = 0.0005;          % Weight matrix learning rate (default)
+end
+if ~exist('momentum', 'var')
+    momentum = 0.90;         % Momentum for representation updates (default)
+end
+if ~exist('weight_decay', 'var')
+    weight_decay = 0.98;     % L2 regularization on weights (default)
+end
+
 pi_L1 = 100;             % Precision (reliability) of L1 sensory input
 pi_L2 = 10;              % Precision of L2 motor basis
 pi_L3 = 1;               % Precision of L3 goal representation

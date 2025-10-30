@@ -34,7 +34,7 @@ fprintf('╚══════════════════════�
 % OPTIMIZATION CONFIGURATION
 % ====================================================================
 
-num_trials = 700;  % Number of random parameter sets to test
+num_trials = 50;  % Number of random parameter sets to test (reduced for testing)
 
 % Define the search space for each parameter.
 % Learning rates are sampled on a log scale, which is standard practice.
@@ -108,24 +108,28 @@ for trial = 1:num_trials
     % --- 2. Run the simulation with these parameters ---
     try
         % Call the 3D hierarchical motion inference model
-        % Run in batch mode with no graphics output
-        old_visible = get(0, 'DefaultFigureVisible');
-        set(0, 'DefaultFigureVisible', 'off');
+        % Set optimizer flag to suppress verbose output
+        optimizer_mode = true;
         
-        % Note: hierarchical_motion_inference_3D_EXACT is a script, not a function
-        % We need to run it in the workspace with the parameters pre-set
-        % Save current params to workspace
+        % Set parameters in workspace
         eta_rep = current_params.eta_rep;
         eta_W = current_params.eta_W;
         momentum = current_params.momentum;
         weight_decay = current_params.weight_decay;
         
-        % Suppress output
+        % Turn off graphics
+        old_visible = get(0, 'DefaultFigureVisible');
+        set(0, 'DefaultFigureVisible', 'off');
+        
+        % Run the 3D model with parameters overridden
+        % Use evalc to suppress all output
         evalc('hierarchical_motion_inference_3D_EXACT');
+        
+        % Restore visibility
+        set(0, 'DefaultFigureVisible', old_visible);
         
         % The script populates: x_true, y_true, z_true, R_L1, phases_indices, targets, reaching_error_all
         
-        set(0, 'DefaultFigureVisible', old_visible);
     catch ME
         fprintf('  ✗ Simulation failed for this parameter set: %s\n', ME.message);
         set(0, 'DefaultFigureVisible', old_visible);
