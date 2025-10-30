@@ -128,10 +128,10 @@ fprintf('  Workspace: x,y,z ∈ [%.2f, %.2f] meters\n\n', workspace_bounds(1,1),
 % LEARNING PARAMETERS
 % ====================================================================
 
-eta_rep = 0.001497;      % Representation learning rate
-eta_W = 0.000155;        % Weight matrix learning rate
-momentum = 0.9415;       % Momentum for representation updates
-weight_decay = 0.9908;   % L2 regularization on weights
+eta_rep = 0.01;          % Representation learning rate (INCREASED from 0.001497)
+eta_W = 0.001;           % Weight matrix learning rate (INCREASED from 0.000155)
+momentum = 0.90;         % Momentum for representation updates (DECREASED for faster learning)
+weight_decay = 0.98;     % L2 regularization on weights (DECREASED for less decay)
 pi_L1 = 100;             % Precision (reliability) of L1 sensory input
 pi_L2 = 10;              % Precision of L2 motor basis
 pi_L3 = 1;               % Precision of L3 goal representation
@@ -317,13 +317,16 @@ for i = 1:N-1
     % STEP 6: REPRESENTATION UPDATES (3D)
     % ==============================================================
     
-    % L1: Proprioceptive state updates (3D position clamped, velocity inferred)
-    R_L1(i+1,1:3) = sensory_input;  % CLAMP: 3D Position from proprioception
+    % L1: Proprioceptive state updates - LEARN from prediction error
+    % Position: update toward sensory input but learn to predict it
+    % (Don't clamp - let it learn!)
+    delta_R_L1_pos = E_L1(i,1:3);  % Position error drives learning
+    R_L1(i+1,1:3) = R_L1(i,1:3) - eta_rep * delta_R_L1_pos * 0.5;  % Partial update
     
     % Velocity inferred from prediction error
-    delta_R_L1_inferred = -E_L1(i,4:6);
+    delta_R_L1_vel = -E_L1(i,4:6);
     decay = 1 - momentum;
-    R_L1(i+1,4:6) = momentum * R_L1(i,4:6) + decay * eta_rep * delta_R_L1_inferred;
+    R_L1(i+1,4:6) = momentum * R_L1(i,4:6) + decay * eta_rep * delta_R_L1_vel;
     R_L1(i+1,4:6) = max(-2, min(2, R_L1(i+1,4:6)));  % 3D Velocity bounds
     R_L1(i+1,7) = 1;  % Bias
     

@@ -87,15 +87,15 @@ for trial = 1:n_trials
         % Solid lines maintain full color but decrease in width
         lw = 3.5 * (1 - progress * 0.4);  % Width: 3.5 → 2.1
         
-        line([traj_x(i), traj_x(i+1)], ...
-             [traj_y(i), traj_y(i+1)], ...
-             [traj_z(i), traj_z(i+1)], ...
-             'Color', rgb(colors{trial}), 'LineWidth', lw, ...
-             'LineStyle', '-', 'HandleVisibility', 'off');
+        plot3([traj_x(i), traj_x(i+1)], ...
+              [traj_y(i), traj_y(i+1)], ...
+              [traj_z(i), traj_z(i+1)], ...
+              'Color', rgb(colors{trial}), 'LineWidth', lw, ...
+              'LineStyle', '-', 'HandleVisibility', 'off');
     end
 end
 
-% Learned trajectories (dashed, fading alpha)
+% Learned trajectories (dashed, fading color brightness)
 fprintf('\nLearned Predictions (dashed lines with fading):\n');
 for trial = 1:n_trials
     trial_idx = phases_indices{trial};
@@ -107,26 +107,26 @@ for trial = 1:n_trials
     n_pts = length(trial_idx);
     fprintf('  Trial %d: %d points\n', trial, n_pts);
     
-    % Plot learned trajectories as dashed with fading alpha
+    % Plot learned trajectories as dashed with fading color brightness
+    base_color = rgb(colors{trial});
+    
     for i = 1:n_pts-1
         progress = i / n_pts;  % 0 to 1 over trajectory
         
-        % Fading effect: opacity decreases from 1.0 to 0.2
-        alpha_val = 1.0 - (progress * 0.8);  % Alpha: 1.0 → 0.2
+        % Fading effect: brightness decreases (interpolate to white for fade)
+        % Progress 0 → color is bright (full saturation)
+        % Progress 1 → color is dim (interpolated toward white)
+        fade_amount = progress * 0.7;  % Fades by 70% toward end
+        faded_color = base_color + (1 - base_color) * fade_amount;  % Blend toward white
         
         % Line width also decreases
         lw = 2.5 * (1 - progress * 0.4);  % Width: 2.5 → 1.5
         
-        % Create dashed line with alpha via patch
-        base_color = rgb(colors{trial});
-        color_with_alpha = [base_color, alpha_val];  % [R, G, B, Alpha]
-        
-        line([traj_x(i), traj_x(i+1)], ...
-             [traj_y(i), traj_y(i+1)], ...
-             [traj_z(i), traj_z(i+1)], ...
-             'Color', base_color, 'LineWidth', lw, ...
-             'LineStyle', '--', 'Alpha', alpha_val, ...
-             'HandleVisibility', 'off');
+        plot3([traj_x(i), traj_x(i+1)], ...
+              [traj_y(i), traj_y(i+1)], ...
+              [traj_z(i), traj_z(i+1)], ...
+              'Color', faded_color, 'LineWidth', lw, ...
+              'LineStyle', '--', 'HandleVisibility', 'off');
     end
 end
 
