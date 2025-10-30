@@ -165,8 +165,15 @@ R_L1(1,1:3) = [x_true(1), y_true(1), z_true(1)];  % Position
 R_L1(1,4:6) = [0, 0, 0];  % Velocity
 R_L1(1,7) = 1;  % Bias
 
-% L2: Motor basis functions (initialize randomly)
-R_L2(1,:) = 0.01 * randn(1, n_L2);
+% L2: Motor basis functions
+% Initialize with reaching direction toward first target
+start_pos = initial_positions(1, :);
+target_pos = targets(1, :);
+reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
+reaching_speed = 0.15;  % m/s
+
+R_L2(1, 1:3) = reach_direction * reaching_speed;  % Velocity commands toward target
+R_L2(1, 4:6) = 0.01 * randn(1, 3);  % Auxiliary motor channels
 
 % L3: Goal representation (will be clamped to task targets)
 R_L3(1,1:3) = targets(1,:);  % Start with first target
@@ -175,33 +182,48 @@ R_L3(1,4) = 1;  % Bias
 fprintf('INITIAL CONDITIONS (Trial 1):\n');
 fprintf('  Start position: [%.2f, %.2f, %.2f]\n', x_true(1), y_true(1), z_true(1));
 fprintf('  Target position: [%.2f, %.2f, %.2f]\n', targets(1,1), targets(1,2), targets(1,3));
-fprintf('  R_L2(1,:) = random motor basis initialization (6D)\n');
+fprintf('  R_L2(1,:) = reaching velocity [%.4f, %.4f, %.4f] m/s (toward target)\n', R_L2(1,1), R_L2(1,2), R_L2(1,3));
 fprintf('  R_L3(1,:) = [target_x=%.2f, target_y=%.2f, target_z=%.2f, bias=1]\n\n', targets(1,1), targets(1,2), targets(1,3));
 
-% Initialize weight matrices for 3D
-W_L1_from_L2 = 0.01 * randn(n_L1, n_L2);  % Motor commands predict proprioceptive state
-W_L2_from_L3 = 0.01 * randn(n_L2, n_L3);  % Goals predict motor commands
+% Initialize weight matrices for 3D with REALISTIC bootstrapped values
+% ===================================================================
+% We need to initialize weights so that:
+%   L3 (goal) → L2 (motor) → L1 (proprioception) produces MOTION
+% Otherwise learning cannot begin (no errors to drive learning)
 
-% Pre-compute ideal reaching trajectories for each trial (bootstrap learning)
-ideal_motor_basis = zeros(n_trials, n_L2);
-for trial = 1:n_trials
-    start_pos = initial_positions(trial, :);
-    target_pos = targets(trial, :);
-    direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
-    speed = 0.15;  % m/s reaching speed
-    
-    % Encode as motor basis: [vx, vy, vz, aux1, aux2, aux3]
-    ideal_motor_basis(trial, 1:3) = direction * speed;
-    ideal_motor_basis(trial, 4:6) = 0.01 * randn(1, 3);  % Small noise on aux channels
-end
+% Key insight: Initialize weights to map goal direction to velocity commands
+% W_L2_from_L3: [4D goal input] → [6D motor basis]
+%   Goal encodes: [target_x, target_y, target_z, bias]
+%   Motor basis needs: [vx, vy, vz, aux1, aux2, aux3]
 
-fprintf('MOTOR INITIALIZATION:\n');
-fprintf('  Each trial initialized with reaching velocity toward target\n');
-fprintf('  Reaching speed: 0.15 m/s\n\n');
+W_L2_from_L3 = zeros(n_L2, n_L3);
+% Map target position to velocity direction (first 3 motor channels)
+% [vx, vy, vz] = 0.1 * [target_x, target_y, target_z]
+W_L2_from_L3(1:3, 1:3) = 0.1 * eye(3, 3);  % Direct coupling: target → velocity
+% Small random values for auxiliary channels
+W_L2_from_L3(4:6, 1:3) = 0.01 * randn(3, 3);
+W_L2_from_L3(1:6, 4) = 0.01 * randn(6, 1);  % Coupling from bias
 
-fprintf('WEIGHT MATRICES INITIALIZED:\n');
-fprintf('  W^(L1): %d × %d  [Proprioception ← Motor basis]\n', n_L1, n_L2);
-fprintf('  W^(L2): %d × %d  [Motor basis ← Goal]\n\n', n_L2, n_L3);
+% W_L1_from_L2: [6D motor basis] → [7D proprioceptive state]
+%   Motor basis: [vx, vy, vz, aux1, aux2, aux3]
+%   Proprioception: [x, y, z, vx_pred, vy_pred, vz_pred, bias]
+%   Simply map motor velocity commands to proprioceptive velocity predictions
+
+W_L1_from_L2 = zeros(n_L1, n_L2);
+% Position channels (x, y, z) get small contributions from motor basis
+W_L1_from_L2(1:3, 1:3) = 0.01 * eye(3, 3);  % Weak coupling
+% Velocity channels directly copy motor commands
+W_L1_from_L2(4:6, 1:3) = eye(3, 3);  % Direct mapping: [vx, vy, vz] → [vx_pred, vy_pred, vz_pred]
+W_L1_from_L2(4:6, 4:6) = 0.1 * randn(3, 3);  % Auxiliary motor channels
+W_L1_from_L2(7, :) = 0.01 * randn(1, 6);  % Bias prediction
+
+fprintf('WEIGHT MATRICES INITIALIZED (Bootstrapped):\n');
+fprintf('  W_L2_from_L3: Goal → Motor (target position → velocity commands)\n');
+fprintf('    - Direct coupling: target_xyz → motor velocity (gain=0.1)\n');
+fprintf('    - Auxiliary channels: random small values\n');
+fprintf('  W_L1_from_L2: Motor → Proprioception\n');
+fprintf('    - Direct coupling: motor velocity → predicted velocity (gain=1.0)\n');
+fprintf('    - Position predictions: weak coupling (gain=0.01)\n\n');
 
 % Allocate storage for tracking - use single precision to save memory
 E_L1 = zeros(N, n_L1, 'single');
@@ -226,7 +248,7 @@ for i = 1:N-1
     % ==============================================================
     % CHECK FOR TRIAL TRANSITION
     % ==============================================================
-    % At the start of each new trial, reinitialize position
+    % At the start of each new trial, reinitialize position and motor basis
     if i > 1
         for trial = 2:n_trials
             if i == phases_indices{trial}(1)
@@ -242,8 +264,17 @@ for i = 1:N-1
                 R_L1(i,1:3) = [x_true(i), y_true(i), z_true(i)];
                 R_L1(i,4:6) = [0, 0, 0];
                 
+                % Re-initialize L2 motor basis with reaching direction toward new target
+                start_pos = initial_positions(trial, :);
+                target_pos = targets(trial, :);
+                reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
+                reaching_speed = 0.15;  % m/s
+                
+                R_L2(i, 1:3) = reach_direction * reaching_speed;
+                R_L2(i, 4:6) = 0.01 * randn(1, 3);
+                
                 current_trial = trial;
-                fprintf('\n[Trial %d started]\n', trial);
+                fprintf('\n[Trial %d started at step %d]\n', trial, i);
                 break;
             end
         end
