@@ -182,6 +182,23 @@ fprintf('  R_L3(1,:) = [target_x=%.2f, target_y=%.2f, target_z=%.2f, bias=1]\n\n
 W_L1_from_L2 = 0.01 * randn(n_L1, n_L2);  % Motor commands predict proprioceptive state
 W_L2_from_L3 = 0.01 * randn(n_L2, n_L3);  % Goals predict motor commands
 
+% Pre-compute ideal reaching trajectories for each trial (bootstrap learning)
+ideal_motor_basis = zeros(n_trials, n_L2);
+for trial = 1:n_trials
+    start_pos = initial_positions(trial, :);
+    target_pos = targets(trial, :);
+    direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
+    speed = 0.15;  % m/s reaching speed
+    
+    % Encode as motor basis: [vx, vy, vz, aux1, aux2, aux3]
+    ideal_motor_basis(trial, 1:3) = direction * speed;
+    ideal_motor_basis(trial, 4:6) = 0.01 * randn(1, 3);  % Small noise on aux channels
+end
+
+fprintf('MOTOR INITIALIZATION:\n');
+fprintf('  Each trial initialized with reaching velocity toward target\n');
+fprintf('  Reaching speed: 0.15 m/s\n\n');
+
 fprintf('WEIGHT MATRICES INITIALIZED:\n');
 fprintf('  W^(L1): %d × %d  [Proprioception ← Motor basis]\n', n_L1, n_L2);
 fprintf('  W^(L2): %d × %d  [Motor basis ← Goal]\n\n', n_L2, n_L3);
@@ -237,29 +254,34 @@ for i = 1:N-1
     % ==============================================================
     % Goal is externally specified and clamped (like visual target in 3D)
     R_L3(i,1:3) = targets(current_trial,:);  % CLAMP: Task provides 3D target
+    R_L3(i,4) = 1;  % Bias
     
     % ==============================================================
-    % STEP 1: FORWARD PREDICTION (Top-Down)
+    % STEP 1: MOTOR COMMAND GENERATION (Top-Down: L3 → L2 → L1)
     % ==============================================================
     
-    % L2 predicts proprioceptive state via motor commands
-    pred_motor = R_L2(i,:) * W_L1_from_L2';  % Predicted velocity (7D)
-    pred_L1(i,:) = [pred_motor(1:3), pred_motor(1:3), 1];  % Position predicted from velocity
+    % L3 predicts L2 motor commands via learned weights
+    pred_L2(i,:) = R_L3(i,:) * W_L2_from_L3';  % [6D motor basis prediction]
     
-    % L3 (goal) predicts L2 (motor commands needed to reach goal)
-    pred_L2(i,:) = R_L3(i,:) * W_L2_from_L3';
+    % L2 executes: actual motor basis is learned representation
+    motor_basis = R_L2(i,:);  % [6D: actual learned motor commands]
+    
+    % L2 predicts L1 proprioceptive state via learned weights
+    pred_L1(i,:) = motor_basis * W_L1_from_L2';  % [7D: predicted proprioception]
+    
+    % Extract predicted velocities from L1 prediction
+    pred_vx = pred_L1(i, 4);
+    pred_vy = pred_L1(i, 5);
+    pred_vz = pred_L1(i, 6);
     
     % ==============================================================
-    % STEP 2: MOTOR EXECUTION (3D)
+    % STEP 2: KINEMATICS - MOTOR COMMAND EXECUTION
     % ==============================================================
     
-    % Motor commands are a weighted combination of basis functions
-    motor_command = R_L2(i,1:6);  % All 6 basis functions
-    
-    % Apply motor gain and damping (simulates muscle dynamics in 3D)
-    motor_vx(i) = motor_gain * motor_command(1);
-    motor_vy(i) = motor_gain * motor_command(2);
-    motor_vz(i) = motor_gain * motor_command(3);
+    % Apply motor gain (scales learned velocity prediction to actual command)
+    motor_vx(i) = motor_gain * pred_vx;
+    motor_vy(i) = motor_gain * pred_vy;
+    motor_vz(i) = motor_gain * pred_vz;
     
     % Update velocity with damping
     vx_true(i+1) = damping * vx_true(i) + motor_vx(i);
@@ -280,26 +302,26 @@ for i = 1:N-1
     % STEP 3: PROPRIOCEPTIVE FEEDBACK (Sensory Input - 3D)
     % ==============================================================
     
-    sensory_input = [x_true(i+1), y_true(i+1), z_true(i+1)];  % Direct 3D position feedback
+    % Sensory input: actual proprioceptive state
+    sensory_pos = [x_true(i+1), y_true(i+1), z_true(i+1)];  % Actual 3D position
+    sensory_vel = [vx_true(i+1), vy_true(i+1), vz_true(i+1)];  % Actual 3D velocity
     
     % ==============================================================
-    % STEP 4: ERROR COMPUTATION (Bottom-Up - 3D)
+    % STEP 4: ERROR COMPUTATION (Bottom-Up Predictive Coding)
     % ==============================================================
     
-    E_L1_full = R_L1(i,:) - pred_L1(i,:);
+    % L1 errors: sensory input vs prediction (prediction error)
+    E_L1(i,1:3) = sensory_pos - pred_L1(i,1:3);  % Position error
+    E_L1(i,4:6) = sensory_vel - pred_L1(i,4:6);  % Velocity error
+    E_L1(i,7) = 1 - pred_L1(i,7);  % Bias error
     
-    % Override position error with actual sensory input (3D)
-    E_L1(i,1:3) = sensory_input - pred_L1(i,1:3);  % 3D position error
-    E_L1(i,4:6) = E_L1_full(4:6);  % Velocity error from prediction
-    E_L1(i,7) = E_L1_full(7);  % Bias error
+    % L2 errors: actual motor basis vs L3's prediction
+    E_L2(i,:) = motor_basis - pred_L2(i,:);
     
-    % L2 error
-    E_L2(i,:) = R_L2(i,:) - pred_L2(i,:);
-    
-    % Calculate 3D reaching error
-    reaching_error_all(i) = sqrt((x_true(i) - targets(current_trial,1))^2 + ...
-                                 (y_true(i) - targets(current_trial,2))^2 + ...
-                                 (z_true(i) - targets(current_trial,3))^2);
+    % Calculate 3D reaching error (distance to current target)
+    reaching_error_all(i) = sqrt((x_true(i+1) - targets(current_trial,1))^2 + ...
+                                 (y_true(i+1) - targets(current_trial,2))^2 + ...
+                                 (z_true(i+1) - targets(current_trial,3))^2);
     
     % ==============================================================
     % STEP 5: FREE ENERGY (Objective Function - 3D)
@@ -314,37 +336,36 @@ for i = 1:N-1
     free_energy_all(i) = fe_L1 + fe_L2 + fe_reaching;
     
     % ==============================================================
-    % STEP 6: REPRESENTATION UPDATES (3D)
+    % STEP 6: REPRESENTATION UPDATES (Predictive Coding)
     % ==============================================================
     
-    % L1: Proprioceptive state updates
-    % Position is integrated from velocity (standard kinematics)
-    % Don't update position directly - let velocity drive it
-    
-    % Velocity inferred from prediction error (small learning rate to avoid divergence)
     decay = 1 - momentum;
-    delta_R_L1_vel = -E_L1(i,4:6);
-    R_L1(i+1,4:6) = momentum * R_L1(i,4:6) + decay * (eta_rep * 0.1) * delta_R_L1_vel;
-    R_L1(i+1,4:6) = max(-2, min(2, R_L1(i+1,4:6)));  % 3D Velocity bounds [-2, 2] m/s
     
-    % Position integrates from velocity (stable kinematic equation)
-    R_L1(i+1,1:3) = R_L1(i,1:3) + dt * R_L1(i+1,4:6);
+    % L1: Learn position and velocity from proprioceptive error
+    % Position error drives position update
+    R_L1(i+1,1:3) = R_L1(i,1:3) + decay * eta_rep * E_L1(i,1:3) * 0.1;
     
-    % Clamp to workspace bounds (prevent unbounded growth)
+    % Velocity error drives velocity update
+    R_L1(i+1,4:6) = momentum * R_L1(i,4:6) + decay * eta_rep * E_L1(i,4:6) * 0.1;
+    R_L1(i+1,4:6) = max(-2, min(2, R_L1(i+1,4:6)));  % Bounds [-2, 2] m/s
+    
+    % Clamp position to workspace to prevent unbounded learning
     R_L1(i+1,1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), R_L1(i+1,1)));
     R_L1(i+1,2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), R_L1(i+1,2)));
     R_L1(i+1,3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), R_L1(i+1,3)));
     
-    R_L1(i+1,7) = 1;  % Bias
+    R_L1(i+1,7) = 1;  % Bias fixed
     
-    % L2: Motor basis updates driven by 3D goal-directed reaching
-    coupling_from_L1 = E_L1(i,:) * W_L1_from_L2;
+    % L2: Learn motor basis from motor error and proprioceptive coupling
+    % Motor error directly drives motor basis learning
+    coupling_from_L1 = E_L1(i,:) * W_L1_from_L2;  % Proprioceptive error → motor error
     norm_W1 = max(0.1, norm(W_L1_from_L2, 'fro'));
-    coupling_from_L1 = coupling_from_L1 / norm_W1;
+    coupling_from_L1 = coupling_from_L1 / norm_W1;  % Normalize coupling
     
-    delta_R_L2 = coupling_from_L1 - E_L2(i,:);
-    R_L2(i+1,:) = momentum * R_L2(i,:) + decay * eta_rep * delta_R_L2;
-    R_L2(i+1,:) = max(-1, min(1, R_L2(i+1,:)));
+    % Motor basis updates from combined errors
+    delta_R_L2 = coupling_from_L1 - E_L2(i,:);  % Proprioceptive coupling vs motor error
+    R_L2(i+1,:) = momentum * R_L2(i,:) + decay * eta_rep * delta_R_L2 * 0.5;
+    R_L2(i+1,:) = max(-1, min(1, R_L2(i+1,:)));  % Bounds [-1, 1]
     
     % ==============================================================
     % STEP 7: WEIGHT LEARNING (Hebbian Rule - 3D)
