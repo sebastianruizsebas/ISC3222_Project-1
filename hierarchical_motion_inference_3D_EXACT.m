@@ -16,7 +16,7 @@ fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\
 % ====================================================================
 
 dt = 0.01;              % Time step (s)
-T_per_trial = 20;      % Duration per trial (s)
+T_per_trial = 40;      % Duration per trial (s)
 n_trials = 4;           % Number of reaching trials
 T = T_per_trial * n_trials;  % Total duration
 t = 0:dt:T;
@@ -284,6 +284,11 @@ for i = 1:N-1
                 R_L1(i,1:3) = [x_true(i), y_true(i), z_true(i)];
                 R_L1(i,4:6) = [0, 0, 0];
                 
+                % HARD RESET L3: Jump to new task target (phase transition)
+                % This ensures L3 can respond to the new task immediately
+                R_L3(i, 1:3) = targets(trial, :);
+                R_L3(i, 4) = 1;
+                
                 % Re-initialize L2 motor basis with reaching direction toward new target
                 start_pos = initial_positions(trial, :);
                 target_pos = targets(trial, :);
@@ -294,7 +299,7 @@ for i = 1:N-1
                 R_L2(i, 4:6) = 0.01 * randn(1, 3);
                 
                 current_trial = trial;
-                fprintf('\n[Trial %d started at step %d]\n', trial, i);
+                fprintf('\n[Trial %d started at step %d - L3 reset to target, L2 reinitialized]\n', trial, i);
                 break;
             end
         end
@@ -428,10 +433,6 @@ for i = 1:N-1
     
     % Error-driven goal update: minimize motor prediction error
     % If E_L2 is large, it means L3's prediction doesn't match actual L2
-    % Back-project motor error to goal space via weight matrix transpose
-    % W_L2_from_L3 is [6 x 4], so W_L2_from_L3' is [4 x 6]
-    % E_L2 is [1 x 6], so E_L2 * inv(W_L2_from_L3') gives goal correction
-    
     % Simple approach: average the motor error to goal space
     E_L3_from_motor = mean(E_L2(i,:)) * ones(1, 3);  % Scalar error projected to 3D goal
     
@@ -439,9 +440,11 @@ for i = 1:N-1
     goal_correction = E_L3_from_motor * 0.1;  % How much to move goal
     R_L3(i+1, 1:3) = R_L3(i, 1:3) + eta_rep * goal_correction;
     
-    % Soft constraint: pull L3 toward task target (doesn't fully clamp it)
-    target_attraction = (task_target - R_L3(i+1, 1:3)) * 0.3;
-    R_L3(i+1, 1:3) = R_L3(i+1, 1:3) + eta_rep * target_attraction;
+    % Strong constraint: keep L3 very close to task target
+    % (with hard reset at phase boundaries, no need for weak attraction)
+    target_proximity = (task_target - R_L3(i+1, 1:3));
+    target_pull_strength = 0.2;  % Stronger pull toward target
+    R_L3(i+1, 1:3) = R_L3(i+1, 1:3) + eta_rep * target_proximity * target_pull_strength;
     
     % Keep L3 in workspace bounds
     R_L3(i+1, 1:3) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), R_L3(i+1,1)));
