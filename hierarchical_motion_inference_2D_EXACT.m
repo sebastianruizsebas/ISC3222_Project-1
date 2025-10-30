@@ -28,13 +28,17 @@ if nargin < 1
 end
 
 % *** MODIFIED: Get parameters from struct or use defaults ***
-eta_rep = get_param(params, 'eta_rep', 0.1);
-eta_W = get_param(params, 'eta_W', 0.01);
-momentum = get_param(params, 'momentum', 0.90);
+% eta_rep = get_param(params, 'eta_rep', 0.1);
+eta_rep = get_param(params, 'eta_rep', 0.001497); % Best: 0.001497
+% eta_W = get_param(params, 'eta_W', 0.01);
+eta_W = get_param(params, 'eta_W', 0.000155); % Best: 0.000155
+% momentum = get_param(params, 'momentum', 0.90);
+momentum = get_param(params, 'momentum', 0.9415); % Best: 0.9415
 pi_L1 = get_param(params, 'pi_L1', 100);
 pi_L2 = get_param(params, 'pi_L2', 10);
 pi_L3 = get_param(params, 'pi_L3', 1);
-weight_decay = get_param(params, 'weight_decay', 0.9995);
+% weight_decay = get_param(params, 'weight_decay', 0.9995);
+weight_decay = get_param(params, 'weight_decay', 0.9908); % Best: 0.9908
 
 
 fprintf('\n');
@@ -184,7 +188,7 @@ fprintf('  Acceleration range: ax,ay ∈ [%.4f, %.4f] m/s²\n\n', ...
     min([ax_true, ay_true]), max([ax_true, ay_true]));
 
 % ====================================================================
-% SENSORY INPUT LAYER (L1): 2D Kinematic Information
+% SENSORY INPUT LAYER (L1): 2D Kinematic INFORMATION
 % ====================================================================
 % L1 receives the complete 2D kinematic state from the environment
 
@@ -282,9 +286,10 @@ for i = 1:N-1
     norm_W1 = max(0.1, norm(W_L1_from_L2, 'fro'));
     coupling_from_L1 = coupling_from_L1 / norm_W1;
     
-    delta_R_L2 = E_L2(i,:) - coupling_from_L1;
+    delta_R_L2 = coupling_from_L1 - E_L2(i,:);
     decay = 1 - momentum;
-    R_L2(i+1,:) = momentum * R_L2(i,:) + decay * (R_L2(i,:) - eta_rep * delta_R_L2);
+    % R_L2(i+1,:) = momentum * R_L2(i,:) + decay * (R_L2(i,:) - eta_rep * delta_R_L2);
+    R_L2(i+1,:) = momentum * R_L2(i,:) + decay * eta_rep * delta_R_L2; % Corrected update rule
     R_L2(i+1,:) = max(-max_rep_value, min(max_rep_value, R_L2(i+1,:)));
     
     % L3: Driven by errors from layer below
@@ -293,7 +298,8 @@ for i = 1:N-1
     coupling_from_L2 = coupling_from_L2 / norm_W2;
     
     delta_R_L3 = coupling_from_L2 - E_L3(i,:);
-    R_L3(i+1,:) = momentum * R_L3(i,:) + decay * (R_L3(i,:) - eta_rep * delta_R_L3);
+    % R_L3(i+1,:) = momentum * R_L3(i,:) + decay * (R_L3(i,:) - eta_rep * delta_R_L3);
+    R_L3(i+1,:) = momentum * R_L3(i,:) + decay * eta_rep * delta_R_L3; % Corrected update rule
     R_L3(i+1,:) = max(-max_rep_value, min(max_rep_value, R_L3(i+1,:)));
     
     % ==============================================================
