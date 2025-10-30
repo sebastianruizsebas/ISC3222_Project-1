@@ -77,10 +77,10 @@ end
 fprintf('\n');
 
 fprintf('3D REACHING TASK:\n');
-fprintf('  Phase 1 (0-2.5s):  Reach to target [%.2f, %.2f, %.2f]\n', targets(1,1), targets(1,2), targets(1,3));
-fprintf('  Phase 2 (2.5-5s):  Reach to target [%.2f, %.2f, %.2f]\n', targets(2,1), targets(2,2), targets(2,3));
-fprintf('  Phase 3 (5-7.5s):  Reach to target [%.2f, %.2f, %.2f]\n', targets(3,1), targets(3,2), targets(3,3));
-fprintf('  Phase 4 (7.5-10s): Reach to target [%.2f, %.2f, %.2f]\n\n', targets(4,1), targets(4,2), targets(4,3));
+fprintf('  Phase 1 (0-%.2fs):  Reach to target [%.2f, %.2f, %.2f]\n', T_per_trial, targets(1,1), targets(1,2), targets(1,3));
+fprintf('  Phase 2 (%.2f-%.2fs):  Reach to target [%.2f, %.2f, %.2f]\n', T_per_trial, 2*T_per_trial, targets(2,1), targets(2,2), targets(2,3));
+fprintf('  Phase 3 (%.2f-%.2fs):  Reach to target [%.2f, %.2f, %.2f]\n', 2*T_per_trial, 3*T_per_trial, targets(3,1), targets(3,2), targets(3,3));
+fprintf('  Phase 4 (%.2f-%.2fs): Reach to target [%.2f, %.2f, %.2f]\n\n', 3*T_per_trial, 4*T_per_trial, targets(4,1), targets(4,2), targets(4,3));
 
 % ====================================================================
 % LAYER DIMENSIONS - 3D VERSION
@@ -128,10 +128,10 @@ fprintf('  Workspace: x,y,z ∈ [%.2f, %.2f] meters\n\n', workspace_bounds(1,1),
 % LEARNING PARAMETERS
 % ====================================================================
 
-eta_rep = 0.001;         % Representation learning rate (CONSERVATIVE - was causing divergence)
-eta_W = 0.0001;          % Weight matrix learning rate (CONSERVATIVE)
-momentum = 0.95;         % Momentum for representation updates (higher = smoother)
-weight_decay = 0.99;     % L2 regularization on weights (more decay = more stability)
+eta_rep = 0.005;         % Representation learning rate (increased from 0.001)
+eta_W = 0.0005;          % Weight matrix learning rate (increased from 0.0001)
+momentum = 0.90;         % Momentum for representation updates (decreased for faster learning)
+weight_decay = 0.98;     % L2 regularization on weights (decreased for faster learning)
 pi_L1 = 100;             % Precision (reliability) of L1 sensory input
 pi_L2 = 10;              % Precision of L2 motor basis
 pi_L3 = 1;               % Precision of L3 goal representation
@@ -190,7 +190,8 @@ R_L1(1,7) = 1;  % Bias
 start_pos = initial_positions(1, :);
 target_pos = targets(1, :);
 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
-reaching_speed = 0.15;  % m/s
+target_distance = norm(target_pos - start_pos);
+reaching_speed = 0.2 * target_distance;  % Scale with distance
 
 R_L2(1, 1:3) = reach_direction * reaching_speed;  % Velocity commands toward target
 R_L2(1, 4:6) = 0.01 * randn(1, 3);  % Auxiliary motor channels
@@ -218,8 +219,8 @@ fprintf('  R_L3(1,:) = [target_x=%.2f, target_y=%.2f, target_z=%.2f, bias=1]\n\n
 
 W_L2_from_L3 = zeros(n_L2, n_L3);
 % Map target position to velocity direction (first 3 motor channels)
-% [vx, vy, vz] = 0.1 * [target_x, target_y, target_z]
-W_L2_from_L3(1:3, 1:3) = 0.1 * eye(3, 3);  % Direct coupling: target → velocity
+% [vx, vy, vz] = 0.2 * [target_x, target_y, target_z]
+W_L2_from_L3(1:3, 1:3) = 0.2 * eye(3, 3);  % Direct coupling: target → velocity (increased from 0.1)
 % Small random values for auxiliary channels
 W_L2_from_L3(4:6, 1:3) = 0.01 * randn(3, 3);
 W_L2_from_L3(1:6, 4) = 0.01 * randn(6, 1);  % Coupling from bias
@@ -293,7 +294,8 @@ for i = 1:N-1
                 start_pos = initial_positions(trial, :);
                 target_pos = targets(trial, :);
                 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
-                reaching_speed = 0.15;  % m/s
+                target_distance = norm(target_pos - start_pos);
+                reaching_speed = 0.2 * target_distance;  % Scale with distance (0.2 = fraction of distance per second)
                 
                 R_L2(i, 1:3) = reach_direction * reaching_speed;
                 R_L2(i, 4:6) = 0.01 * randn(1, 3);
