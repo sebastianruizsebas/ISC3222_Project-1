@@ -1,0 +1,26 @@
+╔═══════════════════════════════════════════════════════════════╗
+║  PERFORMANCE ANALYSIS SUMMARY - 3D SENSORIMOTOR REACHING    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+REACHING PERFORMANCE:
+─────────────────────────────────────────────────────────
+Overall improvement: 2.03 m (100.0%)
+Average per trial: 11.0%
+
+PREDICTION ERRORS:
+─────────────────────────────────────────────────────────
+Position RMSE: 1.2184 m
+Velocity RMSE: 0.0075 m/s
+
+FREE ENERGY:
+─────────────────────────────────────────────────────────
+Initial: 4.168823e+00
+Final:   0.000000e+00
+Reduction: 100.0%
+
+LEARNING EFFICIENCY:
+─────────────────────────────────────────────────────────
+Trial 1: 7.5% improvement, efficiency 0.251214 m/FE
+Trial 2: 6.8% improvement, efficiency 0.216784 m/FE
+Trial 3: 15.2% improvement, efficiency 0.215499 m/FE
+Trial 4: 14.4% improvement, efficiency 0.232955 m/FE

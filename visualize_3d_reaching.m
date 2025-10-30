@@ -4,11 +4,13 @@
 
 clear all; close all; clc;
 
-% ====================================================================
-% LOAD RESULTS
-% ====================================================================
+% Ensure graphics are enabled (override batch mode settings)
+set(0, 'DefaultFigureVisible', 'on');
+set(groot, 'defaultFigureCreateFcn', '');
 
-fprintf('Loading 3D reaching results...\n');
+fprintf('\n╔═══════════════════════════════════════════════════════════════╗\n');
+fprintf('║  3D REACHING TRAJECTORY VISUALIZATION                      ║\n');
+fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
 
 results_file = './figures/3D_reaching_results.mat';
 if ~isfile(results_file)
@@ -34,7 +36,7 @@ fprintf('Trials: %d | Total timesteps: %d\n\n', n_trials, length(x_true));
 % ====================================================================
 
 fig = figure('Name', '3D Sensorimotor Reaching Trajectories', ...
-    'Position', [100, 100, 1600, 900], 'Color', 'white');
+    'Position', [100, 100, 1600, 900], 'Color', 'white', 'Visible', 'on');
 
 % Main 3D plot
 ax_main = subplot(1, 2, 1);
@@ -45,8 +47,8 @@ xlabel('X Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('Y Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
 zlabel('Z Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
 title('Ground Truth (Solid) vs Learned (Transparent Fading)', 'FontSize', 12, 'FontWeight', 'bold');
-view(45, 30);
-cameratoolbar('Show');
+view(ax_main, 45, 30);
+cameratoolbar(fig, 'Show');
 
 % Plot targets
 for trial = 1:n_trials
@@ -63,12 +65,12 @@ for trial = 1:n_trials
 end
 
 % ====================================================================
-% PLOT TRAJECTORIES WITH FADING ALPHA
+% PLOT TRAJECTORIES - OPTIMIZED (Vectorized, No Loop)
 % ====================================================================
 
-fprintf('Plotting trajectories with fading transparency...\n\n');
+fprintf('Plotting trajectories (optimized vectorized approach)...\n\n');
 
-% Ground truth trajectories (solid, opaque)
+% Ground truth trajectories (solid lines with color gradient)
 fprintf('Ground Truth (solid lines):\n');
 for trial = 1:n_trials
     trial_idx = phases_indices{trial};
@@ -78,25 +80,16 @@ for trial = 1:n_trials
     traj_z = z_true(trial_idx);
     
     n_pts = length(trial_idx);
-    fprintf('  Trial %d: %d points\n', trial, n_pts);
+    fprintf('  Trial %d: %d points (plotting as single line)\n', trial, n_pts);
     
-    % Plot ground truth as solid lines with decreasing line width
-    for i = 1:n_pts-1
-        progress = i / n_pts;  % 0 to 1 over trajectory
-        
-        % Solid lines maintain full color but decrease in width
-        lw = 3.5 * (1 - progress * 0.4);  % Width: 3.5 → 2.1
-        
-        plot3([traj_x(i), traj_x(i+1)], ...
-              [traj_y(i), traj_y(i+1)], ...
-              [traj_z(i), traj_z(i+1)], ...
-              'Color', rgb(colors{trial}), 'LineWidth', lw, ...
-              'LineStyle', '-', 'HandleVisibility', 'off');
-    end
+    % Plot entire trajectory as ONE line (vectorized)
+    plot3(traj_x, traj_y, traj_z, '-', ...
+        'Color', rgb(colors{trial}), 'LineWidth', 3, ...
+        'DisplayName', sprintf('Trial %d (Truth)', trial));
 end
 
-% Learned trajectories (dashed, fading color brightness)
-fprintf('\nLearned Predictions (dashed lines with fading):\n');
+% Learned trajectories (dashed lines)
+fprintf('\nLearned Predictions (dashed lines):\n');
 for trial = 1:n_trials
     trial_idx = phases_indices{trial};
     
@@ -105,29 +98,23 @@ for trial = 1:n_trials
     traj_z = R_L1(trial_idx,3);
     
     n_pts = length(trial_idx);
-    fprintf('  Trial %d: %d points\n', trial, n_pts);
+    fprintf('  Trial %d: %d points (plotting as single line)\n', trial, n_pts);
     
-    % Plot learned trajectories as dashed with fading color brightness
-    base_color = rgb(colors{trial});
+    % Plot entire trajectory as ONE dashed line (vectorized)
+    plot3(traj_x, traj_y, traj_z, '--', ...
+        'Color', rgb(colors{trial}), 'LineWidth', 2.5, ...
+        'DisplayName', sprintf('Trial %d (Learned)', trial));
+end
+
+% Optional: Add markers every N points to show trajectory progression
+N_marker = 10000;  % Plot marker every 10k steps
+
+for trial = 1:n_trials
+    trial_idx = phases_indices{trial};
+    marker_indices = trial_idx(1:N_marker:end);
     
-    for i = 1:n_pts-1
-        progress = i / n_pts;  % 0 to 1 over trajectory
-        
-        % Fading effect: brightness decreases (interpolate to white for fade)
-        % Progress 0 → color is bright (full saturation)
-        % Progress 1 → color is dim (interpolated toward white)
-        fade_amount = progress * 0.7;  % Fades by 70% toward end
-        faded_color = base_color + (1 - base_color) * fade_amount;  % Blend toward white
-        
-        % Line width also decreases
-        lw = 2.5 * (1 - progress * 0.4);  % Width: 2.5 → 1.5
-        
-        plot3([traj_x(i), traj_x(i+1)], ...
-              [traj_y(i), traj_y(i+1)], ...
-              [traj_z(i), traj_z(i+1)], ...
-              'Color', faded_color, 'LineWidth', lw, ...
-              'LineStyle', '--', 'HandleVisibility', 'off');
-    end
+    plot3(R_L1(marker_indices,1), R_L1(marker_indices,2), R_L1(marker_indices,3), ...
+        '.', 'Color', rgb(colors{trial}), 'MarkerSize', 4, 'HandleVisibility', 'off');
 end
 
 legend('Location', 'best', 'FontSize', 10);
@@ -172,6 +159,10 @@ legend('Location', 'best', 'FontSize', 9);
 
 sgtitle('3D Sensorimotor Reaching: Ground Truth vs Learned Predictions', ...
     'FontSize', 14, 'FontWeight', 'bold');
+
+% Bring figure to front
+drawnow;
+figure(fig);
 
 % ====================================================================
 % ANALYSIS PANEL
@@ -232,38 +223,15 @@ fprintf('Total Reduction:      %.6e (%.1f%%)\n\n', ...
     free_energy_all(1) - free_energy_all(end), ...
     ((free_energy_all(1) - free_energy_all(end)) / free_energy_all(1)) * 100);
 
-% ====================================================================
-% SAVE FIGURE
-% ====================================================================
-
-fprintf('Saving visualization...\n');
-
-output_dir = './figures';
-if ~exist(output_dir, 'dir')
-    mkdir(output_dir);
-end
-
-try
-    fig_filename = fullfile(output_dir, '3D_trajectories_interactive.png');
-    saveas(fig, fig_filename, 'png');
-    fprintf('✓ Figure saved: %s\n', fig_filename);
-catch ME
-    fprintf('Warning: Could not save figure: %s\n', ME.message);
-end
-
-try
-    fig_filename_pdf = fullfile(output_dir, '3D_trajectories_interactive.pdf');
-    saveas(fig, fig_filename_pdf, 'pdf');
-    fprintf('✓ Figure saved: %s\n', fig_filename_pdf);
-catch ME
-    fprintf('Warning: Could not save PDF: %s\n', ME.message);
-end
-
 fprintf('\n✓ Visualization complete!\n');
 fprintf('  Explore the 3D view using the mouse:\n');
 fprintf('  - Left-click + drag: Rotate\n');
 fprintf('  - Right-click + drag: Zoom\n');
 fprintf('  - Middle-click + drag: Pan\n');
+fprintf('\n(Close the figure window to continue.)\n');
+
+% Keep figure window open
+pause;
 
 % ====================================================================
 % HELPER FUNCTION: Color string to RGB

@@ -51,7 +51,7 @@ end
 % ====================================================================
 
 dt = 0.01;              % Time step (s)
-T_per_trial = 40;      % Duration per trial (s)
+T_per_trial = 4000;      % Duration per trial (s)
 n_trials = 4;           % Number of reaching trials
 T = T_per_trial * n_trials;  % Total duration
 t = 0:dt:T;
@@ -122,7 +122,7 @@ fprintf('  Phase 4 (%.2f-%.2fs): Reach to target [%.2f, %.2f, %.2f]\n\n', 3*T_pe
 % ====================================================================
 
 n_L1 = 7;               % Level 1: x, y, z, vx, vy, vz, + 1 bias (proprioceptive state)
-n_L2 = 6;               % Level 2: 6 learned motor basis functions
+n_L2 = 6;               % Level 2: 20 learned motor basis functions
 n_L3 = 4;               % Level 3: target_x, target_y, target_z, + 1 bias (goal representation)
 
 fprintf('NETWORK ARCHITECTURE (3D SENSORIMOTOR):\n');
@@ -152,7 +152,7 @@ motor_vz = zeros(1, N);  % Desired velocity in z from motor system
 
 % Damping factor: actual velocity is proportional to commanded velocity
 motor_gain = 0.5;
-damping = 0.95;
+damping = 0.85;
 
 fprintf('3D MOTOR DYNAMICS:\n');
 fprintf('  Motor gain: %.2f (scaling of commands to actual motion)\n', motor_gain);
@@ -165,16 +165,24 @@ fprintf('  Workspace: x,y,z ∈ [%.2f, %.2f] meters\n\n', workspace_bounds(1,1),
 
 % Allow parameters to be overridden by optimizer
 if ~exist('eta_rep', 'var')
-    eta_rep = 0.005;         % Representation learning rate (default)
+    eta_rep = 0.005;
 end
 if ~exist('eta_W', 'var')
-    eta_W = 0.0005;          % Weight matrix learning rate (default)
+    eta_W = 0.0005;
 end
 if ~exist('momentum', 'var')
-    momentum = 0.90;         % Momentum for representation updates (default)
+    momentum = 0.98;
 end
 if ~exist('weight_decay', 'var')
-    weight_decay = 0.98;     % L2 regularization on weights (default)
+    weight_decay = 0.98;
+end
+
+% NEW: Weight decay at phase transitions (can be optimized)
+if ~exist('decay_L2_goal', 'var')
+    decay_L2_goal = 0.85;  % Decay for W_L2_from_L3 at phase boundaries (0-1) - LIGHTER decay
+end
+if ~exist('decay_L1_motor', 'var')
+    decay_L1_motor = 0.90;  % Decay for W_L1_from_L2 at phase boundaries (0-1) - LIGHTER decay
 end
 
 pi_L1 = 100;             % Precision (reliability) of L1 sensory input
@@ -236,7 +244,7 @@ start_pos = initial_positions(1, :);
 target_pos = targets(1, :);
 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
 target_distance = norm(target_pos - start_pos);
-reaching_speed = 0.2 * target_distance;  % Scale with distance
+reaching_speed = 0.5 * target_distance;  % INCREASED: was 0.2, now 0.5 for stronger motion
 
 R_L2(1, 1:3) = reach_direction * reaching_speed;  % Velocity commands toward target
 R_L2(1, 4:6) = 0.01 * randn(1, 3);  % Auxiliary motor channels
@@ -264,8 +272,8 @@ fprintf('  R_L3(1,:) = [target_x=%.2f, target_y=%.2f, target_z=%.2f, bias=1]\n\n
 
 W_L2_from_L3 = zeros(n_L2, n_L3);
 % Map target position to velocity direction (first 3 motor channels)
-% [vx, vy, vz] = 0.2 * [target_x, target_y, target_z]
-W_L2_from_L3(1:3, 1:3) = 0.2 * eye(3, 3);  % Direct coupling: target → velocity (increased from 0.1)
+% [vx, vy, vz] = 0.5 * [target_x, target_y, target_z] - INCREASED from 0.2 for stronger motion
+W_L2_from_L3(1:3, 1:3) = 0.5 * eye(3, 3);  % Direct coupling: target → velocity (INCREASED)
 % Small random values for auxiliary channels
 W_L2_from_L3(4:6, 1:3) = 0.01 * randn(3, 3);
 W_L2_from_L3(1:6, 4) = 0.01 * randn(6, 1);  % Coupling from bias
@@ -296,9 +304,29 @@ E_L1 = zeros(N, n_L1, 'single');
 E_L2 = zeros(N, n_L2, 'single');
 pred_L1 = zeros(N, n_L1, 'single');
 pred_L2 = zeros(N, n_L2, 'single');
-free_energy_all = zeros(1, N, 'single');
+free_energy_all = zeros(1, N, 'single');  % Changed from N to N
 reaching_error_all = zeros(1, N, 'single');
 learning_trace_W = zeros(1, N);  % Track weight learning magnitude
+
+% ====================================================================
+% DYNAMIC PRECISION - Based on Prediction Errors
+% ====================================================================
+% In active inference, precision represents confidence in predictions
+% High error → low precision (don't trust the prediction)
+% Low error → high precision (trust the prediction)
+
+% Initialize base precisions
+pi_L1_base = 100;
+pi_L2_base = 10;
+pi_L3_base = 1;
+
+% Rolling window for error statistics (last 100 steps)
+window_size = 100;
+
+% Track error history
+L1_error_history = [];
+L2_error_history = [];
+L3_error_history = [];
 
 % ====================================================================
 % MAIN LEARNING LOOP (3D)
@@ -319,7 +347,7 @@ for i = 1:N-1
     if i > 1
         for trial = 2:n_trials
             if i == phases_indices{trial}(1)
-                % Reset to new trial initial position
+                % Reset ONLY position and goal (hard) - task-specific
                 x_true(i) = initial_positions(trial, 1);
                 y_true(i) = initial_positions(trial, 2);
                 z_true(i) = initial_positions(trial, 3);
@@ -327,53 +355,41 @@ for i = 1:N-1
                 vy_true(i) = 0;
                 vz_true(i) = 0;
                 
-                % Update L1 sensory representation
                 R_L1(i,1:3) = [x_true(i), y_true(i), z_true(i)];
                 R_L1(i,4:6) = [0, 0, 0];
                 
-                % HARD RESET L3: Jump to new task target (phase transition)
-                % This ensures L3 can respond to the new task immediately
+                % Reset L3 to new target
                 R_L3(i, 1:3) = targets(trial, :);
                 R_L3(i, 4) = 1;
                 
-                % Re-initialize L2 motor basis with reaching direction toward new target
+                % Re-initialize L2 motor basis only (fresh start for new target)
                 start_pos = initial_positions(trial, :);
                 target_pos = targets(trial, :);
                 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
                 target_distance = norm(target_pos - start_pos);
-                reaching_speed = 0.2 * target_distance;  % Scale with distance
+                reaching_speed = 0.5 * target_distance;  % INCREASED: stronger initial motion
                 
                 R_L2(i, 1:3) = reach_direction * reaching_speed;
                 R_L2(i, 4:6) = 0.01 * randn(1, 3);
                 
-                % PARTIALLY RESET WEIGHTS to break out of Trial 1 convergence
-                % Keep structure but reduce magnitudes learned in previous trial
-                W_L2_from_L3_old = W_L2_from_L3;
-                W_L1_from_L2_old = W_L1_from_L2;
+                % Apply weight decay to break trial-specific overfitting
+                % This prevents catastrophic interference when task target changes
+                W_L2_from_L3 = decay_L2_goal * W_L2_from_L3;
+                W_L1_from_L2 = decay_L1_motor * W_L1_from_L2;
                 
-                W_L2_from_L3 = 0.5 * W_L2_from_L3;  % Decay learned weights by 50%
-                W_L1_from_L2 = 0.7 * W_L1_from_L2;  % Decay velocity coupling
-                
-                % CRITICAL: Reset motor→velocity rows to identity at phase boundary
-                % Prevent these from being zeroed out during learning
-                W_L1_from_L2(4:6, 1:3) = eye(3, 3);  % Reset motor→velocity mapping
+                % CRITICAL: Reset motor→velocity rows to identity
+                W_L1_from_L2(4:6, 1:3) = eye(3, 3);  % Fundamental: motor→velocity mapping
                 
                 current_trial = trial;
-                W_L23_norm_before = norm(W_L2_from_L3_old);
-                W_L23_norm_after = norm(W_L2_from_L3);
-                W_L12_norm_before = norm(W_L1_from_L2_old);
-                W_L12_norm_after = norm(W_L1_from_L2);
                 
-                % Diagnose W_L1_from_L2 structure
-                vel_coupling_rows = W_L1_from_L2(4:6, :);  % Rows 4-6 predict velocity
-                vel_coupling_norm = norm(vel_coupling_rows);
+                fprintf('\n[Trial %d started at step %d]\n', trial, i);
+                fprintf('  L3 reset to new target: [%.2f, %.2f, %.2f]\n', targets(trial,1), targets(trial,2), targets(trial,3));
+                fprintf('  L2 motor basis reinitialized: velocity = [%.4f, %.4f, %.4f] m/s\n', ...
+                    R_L2(i, 1), R_L2(i, 2), R_L2(i, 3));
+                fprintf('  Weight decay applied (light - preserves learned structure):\n');
+                fprintf('    W_L2_from_L3: scaled by %.2f (%.0f%% retained)\n', decay_L2_goal, 100*decay_L2_goal);
+                fprintf('    W_L1_from_L2: scaled by %.2f (%.0f%% retained) + motor→velocity reset\n', decay_L1_motor, 100*decay_L1_motor);
                 
-                fprintf('\n[Trial %d started at step %d - WEIGHT DECAY]\n', trial, i);
-                fprintf('  W_L2_from_L3: ||W|| %.6f → %.6f (decay: %.1f%%)\n', W_L23_norm_before, W_L23_norm_after, 50);
-                fprintf('  W_L1_from_L2: ||W|| %.6f → %.6f (decay: %.1f%%)\n', W_L12_norm_before, W_L12_norm_after, 30);
-                fprintf('  W_L1_from_L2 velocity rows (4-6): ||W_vel|| = %.6f (RESET to identity)\n', vel_coupling_norm);
-                fprintf('  L2 reinitialized: R_L2(i,1:3) = [%.4f, %.4f, %.4f] (reaching speed %.4f m/s)\n', ...
-                    R_L2(i,1), R_L2(i,2), R_L2(i,3), reaching_speed);
                 break;
             end
         end
@@ -473,15 +489,13 @@ for i = 1:N-1
                                  (z_true(i+1) - targets(current_trial,3))^2);
     
     % ==============================================================
-    % STEP 5: FREE ENERGY (Objective Function - 3D)
+    % STEP 5: FREE ENERGY WITH DYNAMIC PRECISION
     % ==============================================================
     
-    fe_L1 = sum(E_L1(i,:).^2) / (2 * pi_L1);
+    fe_L1 = sum(E_L1(i,:).^2) / (2 * pi_L1);  % Automatically scales with precision
     fe_L2 = sum(E_L2(i,:).^2) / (2 * pi_L2);
-    
-    % Add 3D reaching cost to free energy
     fe_reaching = (pi_L1 / 100) * reaching_error_all(i)^2;
-    
+
     free_energy_all(i) = fe_L1 + fe_L2 + fe_reaching;
     
     % ==============================================================
@@ -543,21 +557,18 @@ for i = 1:N-1
     R_L3(i+1, 4) = 1;  % Bias fixed
     
     % ==============================================================
-    % STEP 7: WEIGHT LEARNING (Hebbian Rule - 3D)
-    % ==============================================================
+    % STEP 7: WEIGHT LEARNING WITH DYNAMIC PRECISION
+    % ====================================================================
     
     layer_scale_L1 = max(0.1, mean(abs(R_L2(i,:))));
     layer_scale_L2 = max(0.1, mean(abs(R_L3(i,:))));
     
-    % Learn mapping from motor basis to proprioceptive state
+    % Precision now automatically tunes learning rates
     dW_L1 = -(eta_W * pi_L1 / layer_scale_L1) * (E_L1(i,:)' * R_L2(i,:));
     W_L1_from_L2 = W_L1_from_L2 + dW_L1;
-    W_L1_from_L2 = max(-10, min(10, W_L1_from_L2));  % Bounds: [-10, 10]
     
-    % Learn mapping from goals to motor commands
     dW_L2 = -(eta_W * pi_L2 / layer_scale_L2) * (E_L2(i,:)' * R_L3(i,:));
     W_L2_from_L3 = W_L2_from_L3 + dW_L2;
-    W_L2_from_L3 = max(-10, min(10, W_L2_from_L3));  % Bounds: [-10, 10]
     
     % Weight regularization
     W_L1_from_L2 = W_L1_from_L2 * weight_decay;
@@ -565,6 +576,63 @@ for i = 1:N-1
     
     learning_trace_W(i) = norm(dW_L1, 'fro') + norm(dW_L2, 'fro');
     
+    % ====================================================================
+    % UPDATE ERROR HISTORIES FOR DYNAMIC PRECISION
+    % ====================================================================
+    
+    L1_error_mag = sqrt(sum(E_L1(i,:).^2));
+    L2_error_mag = sqrt(sum(E_L2(i,:).^2));
+    L3_error_mag = sqrt(sum(E_L3_from_motor.^2));  % Use this if you compute L3 error explicitly
+    
+    L1_error_history = [L1_error_history, L1_error_mag];
+    L2_error_history = [L2_error_history, L2_error_mag];
+    L3_error_history = [L3_error_history, L3_error_mag];
+    
+    % Keep only last window_size values
+    if length(L1_error_history) > window_size
+        L1_error_history = L1_error_history(end-window_size+1:end);
+        L2_error_history = L2_error_history(end-window_size+1:end);
+        L3_error_history = L3_error_history(end-window_size+1:end);
+    end
+    
+    % ====================================================================
+    % COMPUTE DYNAMIC PRECISIONS
+    % ====================================================================
+    % Precision is inverse of variance: π = 1 / (σ² + epsilon)
+    % High error → low precision (less confident)
+    % Low error → high precision (more confident)
+    
+    epsilon = 0.01;  % Prevent division by zero
+    
+    if length(L1_error_history) > 10
+        L1_error_var = var(L1_error_history);
+        pi_L1 = pi_L1_base / (1 + L1_error_var / epsilon);  % Decreases with error
+        pi_L1 = max(1, min(1000, pi_L1));  % Keep in reasonable bounds
+    else
+        pi_L1 = pi_L1_base;
+    end
+    
+    if length(L2_error_history) > 10
+        L2_error_var = var(L2_error_history);
+        pi_L2 = pi_L2_base / (1 + L2_error_var / epsilon);
+        pi_L2 = max(0.1, min(100, pi_L2));
+    else
+        pi_L2 = pi_L2_base;
+    end
+    
+    if length(L3_error_history) > 10
+        L3_error_var = var(L3_error_history);
+        pi_L3 = pi_L3_base / (1 + L3_error_var / epsilon);
+        pi_L3 = max(0.01, min(10, pi_L3));
+    else
+        pi_L3 = pi_L3_base;
+    end
+    
+    % DEBUG: Print dynamic precisions every 1000 steps
+    if mod(i, 1000) == 0 && i > 1000
+        fprintf('  Step %d: π_L1=%.2f, π_L2=%.2f, π_L3=%.2f | Errors: L1=%.4f, L2=%.4f, L3=%.4f\n', ...
+            i, pi_L1, pi_L2, pi_L3, mean(L1_error_history), mean(L2_error_history), mean(L3_error_history));
+    end
 end  % End main loop
 
 fprintf('\n✓ Main loop complete (%d iterations executed)\n\n', N-1);
@@ -728,7 +796,7 @@ end
 
 fprintf('LEARNING EFFICIENCY:\n');
 fprintf('─────────────────────────────────────────────────────────\n');
-fprintf('Final Free Energy:           %.6e\n', free_energy_all(end));
+fprintf('Final Free Energy:           %.6e\n', free_energy_all(end-1));  % OR fixed allocation
 fprintf('Free Energy Reduction Rate:  %.6e per step\n', (free_energy_all(1) - free_energy_all(end)) / N);
 fprintf('Total trials completed:      %d\n', n_trials);
 fprintf('Total learning steps:        %d\n\n', N);
