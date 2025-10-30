@@ -20,6 +20,13 @@ function [] = hierarchical_motion_inference_3D_EXACT(params, make_plots)
         if isfield(params, 'eta_W'), eta_W = params.eta_W; end
         if isfield(params, 'momentum'), momentum = params.momentum; end
         if isfield(params, 'weight_decay'), weight_decay = params.weight_decay; end
+        if isfield(params, 'motor_gain'), motor_gain = params.motor_gain; end
+        if isfield(params, 'damping'), damping = params.damping; end
+        if isfield(params, 'reaching_speed_scale'), reaching_speed_scale = params.reaching_speed_scale; end
+        if isfield(params, 'decay_L2_goal'), decay_L2_goal = params.decay_L2_goal; end
+        if isfield(params, 'decay_L1_motor'), decay_L1_motor = params.decay_L1_motor; end
+        if isfield(params, 'W_L2_goal_gain'), W_L2_goal_gain = params.W_L2_goal_gain; end
+        if isfield(params, 'W_L1_pos_gain'), W_L1_pos_gain = params.W_L1_pos_gain; end
         optimizer_mode = true;
     else
         optimizer_mode = false;
@@ -151,8 +158,16 @@ motor_vy = zeros(1, N);  % Desired velocity in y from motor system
 motor_vz = zeros(1, N);  % Desired velocity in z from motor system
 
 % Damping factor: actual velocity is proportional to commanded velocity
-motor_gain = 0.5;
-damping = 0.85;
+% (Can be optimized via params)
+if ~exist('motor_gain', 'var')
+    motor_gain = 0.5;
+end
+if ~exist('damping', 'var')
+    damping = 0.85;
+end
+if ~exist('reaching_speed_scale', 'var')
+    reaching_speed_scale = 0.5;
+end
 
 fprintf('3D MOTOR DYNAMICS:\n');
 fprintf('  Motor gain: %.2f (scaling of commands to actual motion)\n', motor_gain);
@@ -183,6 +198,14 @@ if ~exist('decay_L2_goal', 'var')
 end
 if ~exist('decay_L1_motor', 'var')
     decay_L1_motor = 0.90;  % Decay for W_L1_from_L2 at phase boundaries (0-1) - LIGHTER decay
+end
+
+% NEW: Weight initialization gains (can be optimized)
+if ~exist('W_L2_goal_gain', 'var')
+    W_L2_goal_gain = 0.5;  % Initial coupling: target → velocity
+end
+if ~exist('W_L1_pos_gain', 'var')
+    W_L1_pos_gain = 0.01;  % Position coupling: weak
 end
 
 pi_L1 = 100;             % Precision (reliability) of L1 sensory input
@@ -244,7 +267,7 @@ start_pos = initial_positions(1, :);
 target_pos = targets(1, :);
 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
 target_distance = norm(target_pos - start_pos);
-reaching_speed = 0.5 * target_distance;  % INCREASED: was 0.2, now 0.5 for stronger motion
+reaching_speed = reaching_speed_scale * target_distance;  % Use optimizable parameter
 
 R_L2(1, 1:3) = reach_direction * reaching_speed;  % Velocity commands toward target
 R_L2(1, 4:6) = 0.01 * randn(1, 3);  % Auxiliary motor channels
@@ -367,7 +390,7 @@ for i = 1:N-1
                 target_pos = targets(trial, :);
                 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
                 target_distance = norm(target_pos - start_pos);
-                reaching_speed = 0.5 * target_distance;  % INCREASED: stronger initial motion
+                reaching_speed = reaching_speed_scale * target_distance;  % Use optimizable parameter
                 
                 R_L2(i, 1:3) = reach_direction * reaching_speed;
                 R_L2(i, 4:6) = 0.01 * randn(1, 3);
@@ -657,7 +680,8 @@ try
     results_filename = fullfile(output_dir, '3D_reaching_results.mat');
     save(results_filename, 'x_true', 'y_true', 'z_true', 'vx_true', 'vy_true', 'vz_true', ...
         'R_L1', 'R_L2', 'R_L3', 'pos_error', 'vel_error', 'free_energy_all', ...
-        'reaching_error_all', 'targets', 'phases_indices', 'trial_start_positions', '-v7.3');
+        'reaching_error_all', 'targets', 'phases_indices', 'trial_start_positions', ...
+        'W_L1_from_L2', 'W_L2_from_L3', 'learning_trace_W', '-v7.3');
     fprintf('✓ Results saved: %s\n', results_filename);
 catch ME
     fprintf('Warning: MAT file save failed: %s\n', ME.message);

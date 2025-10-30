@@ -51,8 +51,10 @@ fprintf('  Noise scale (stochastic exploration): %.2f\n\n', noise_scale);
 % DEFINE SEARCH SPACE FOR PARAMETERS
 % ====================================================================
 
-% Parameter bounds
+% Parameter bounds - now includes 11 parameters (extended from 3)
 param_bounds = struct();
+
+% LEARNING RATES (log scale)
 param_bounds.eta_rep.log_min = -4;      % 10^-4 = 0.0001
 param_bounds.eta_rep.log_max = -1;      % 10^-1 = 0.1
 param_bounds.eta_W.log_min = -6;        % 10^-6 = 0.000001
@@ -60,19 +62,61 @@ param_bounds.eta_W.log_max = -1;        % 10^-1 = 0.1
 param_bounds.momentum.min = 0.70;       % Linear scale
 param_bounds.momentum.max = 0.98;
 
+% WEIGHT DECAY (linear scale, affects learning across trials)
+param_bounds.decay_L2_goal.min = 0.10;  % L2 weight decay
+param_bounds.decay_L2_goal.max = 0.99;
+param_bounds.decay_L1_motor.min = 0.10; % L1 weight decay
+param_bounds.decay_L1_motor.max = 0.99;
+
+% MOTOR DYNAMICS (linear scale, affects trajectory quality)
+param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
+param_bounds.motor_gain.max = 1.0;
+param_bounds.damping.min = 0.70;        % Velocity dampening
+param_bounds.damping.max = 0.99;
+param_bounds.reaching_speed_scale.min = 0.1;  % Scale for initial reaching speed
+param_bounds.reaching_speed_scale.max = 1.0;
+
+% WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
+param_bounds.W_L2_goal_gain.min = 0.1;  % L3→L2 weight initialization
+param_bounds.W_L2_goal_gain.max = 1.0;
+param_bounds.W_L1_pos_gain.min = 0.001; % L2→L1 weight initialization
+param_bounds.W_L1_pos_gain.max = 0.1;
+
 % Objective function weights
 % For 3D reaching, primary metric is reaching distance improvement
 objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
 
-fprintf('PARAMETER SEARCH SPACE:\n');
+fprintf('PARAMETER SEARCH SPACE (11-DIMENSIONAL):\n');
+fprintf('═════════════════════════════════════════\n');
+fprintf('LEARNING RATES:\n');
 fprintf('  eta_rep:  [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
     10^param_bounds.eta_rep.log_min, 10^param_bounds.eta_rep.log_max, ...
     param_bounds.eta_rep.log_min, param_bounds.eta_rep.log_max);
 fprintf('  eta_W:    [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
     10^param_bounds.eta_W.log_min, 10^param_bounds.eta_W.log_max, ...
     param_bounds.eta_W.log_min, param_bounds.eta_W.log_max);
-fprintf('  momentum: [%.2f, %.2f] (linear scale)\n\n', ...
+fprintf('  momentum: [%.2f, %.2f] (linear scale)\n', ...
     param_bounds.momentum.min, param_bounds.momentum.max);
+
+fprintf('WEIGHT DECAY (trial transfer):\n');
+fprintf('  decay_L2_goal: [%.2f, %.2f]\n', ...
+    param_bounds.decay_L2_goal.min, param_bounds.decay_L2_goal.max);
+fprintf('  decay_L1_motor: [%.2f, %.2f]\n', ...
+    param_bounds.decay_L1_motor.min, param_bounds.decay_L1_motor.max);
+
+fprintf('MOTOR DYNAMICS (trajectory quality):\n');
+fprintf('  motor_gain: [%.2f, %.2f]\n', ...
+    param_bounds.motor_gain.min, param_bounds.motor_gain.max);
+fprintf('  damping: [%.2f, %.2f]\n', ...
+    param_bounds.damping.min, param_bounds.damping.max);
+fprintf('  reaching_speed_scale: [%.2f, %.2f]\n', ...
+    param_bounds.reaching_speed_scale.min, param_bounds.reaching_speed_scale.max);
+
+fprintf('WEIGHT INITIALIZATION (convergence speed):\n');
+fprintf('  W_L2_goal_gain: [%.3f, %.2f]\n', ...
+    param_bounds.W_L2_goal_gain.min, param_bounds.W_L2_goal_gain.max);
+fprintf('  W_L1_pos_gain: [%.4f, %.3f]\n\n', ...
+    param_bounds.W_L1_pos_gain.min, param_bounds.W_L1_pos_gain.max);
 
 fprintf('OBJECTIVE FUNCTION WEIGHTS:\n');
 fprintf('  Reaching distance improvement: %.1f\n', objective_weights.reaching_distance);
@@ -91,6 +135,7 @@ for p = 1:num_particles
     % Use Latin hypercube or stratified sampling for better spread
     % Divide parameter space into cells for each particle
     
+    % LEARNING RATES
     % eta_rep: spread particles across log scale
     log_eta_rep_min = param_bounds.eta_rep.log_min;
     log_eta_rep_max = param_bounds.eta_rep.log_max;
@@ -111,8 +156,43 @@ for p = 1:num_particles
     mom_cell = mom_min + (p-1) * (mom_max - mom_min) / num_particles;
     particles(p).momentum = mom_cell + rand() * (mom_max - mom_min) / num_particles;
     
-    % Fixed parameter
-    particles(p).weight_decay = 0.98;
+    % WEIGHT DECAY
+    dec_L2_min = param_bounds.decay_L2_goal.min;
+    dec_L2_max = param_bounds.decay_L2_goal.max;
+    dec_L2_cell = dec_L2_min + (p-1) * (dec_L2_max - dec_L2_min) / num_particles;
+    particles(p).decay_L2_goal = dec_L2_cell + rand() * (dec_L2_max - dec_L2_min) / num_particles;
+    
+    dec_L1_min = param_bounds.decay_L1_motor.min;
+    dec_L1_max = param_bounds.decay_L1_motor.max;
+    dec_L1_cell = dec_L1_min + (p-1) * (dec_L1_max - dec_L1_min) / num_particles;
+    particles(p).decay_L1_motor = dec_L1_cell + rand() * (dec_L1_max - dec_L1_min) / num_particles;
+    
+    % MOTOR DYNAMICS
+    mg_min = param_bounds.motor_gain.min;
+    mg_max = param_bounds.motor_gain.max;
+    mg_cell = mg_min + (p-1) * (mg_max - mg_min) / num_particles;
+    particles(p).motor_gain = mg_cell + rand() * (mg_max - mg_min) / num_particles;
+    
+    damp_min = param_bounds.damping.min;
+    damp_max = param_bounds.damping.max;
+    damp_cell = damp_min + (p-1) * (damp_max - damp_min) / num_particles;
+    particles(p).damping = damp_cell + rand() * (damp_max - damp_min) / num_particles;
+    
+    rss_min = param_bounds.reaching_speed_scale.min;
+    rss_max = param_bounds.reaching_speed_scale.max;
+    rss_cell = rss_min + (p-1) * (rss_max - rss_min) / num_particles;
+    particles(p).reaching_speed_scale = rss_cell + rand() * (rss_max - rss_min) / num_particles;
+    
+    % WEIGHT INITIALIZATION
+    wl2_min = param_bounds.W_L2_goal_gain.min;
+    wl2_max = param_bounds.W_L2_goal_gain.max;
+    wl2_cell = wl2_min + (p-1) * (wl2_max - wl2_min) / num_particles;
+    particles(p).W_L2_goal_gain = wl2_cell + rand() * (wl2_max - wl2_min) / num_particles;
+    
+    wl1_min = param_bounds.W_L1_pos_gain.min;
+    wl1_max = param_bounds.W_L1_pos_gain.max;
+    wl1_cell = wl1_min + (p-1) * (wl1_max - wl1_min) / num_particles;
+    particles(p).W_L1_pos_gain = wl1_cell + rand() * (wl1_max - wl1_min) / num_particles;
     
     % Initialize velocity with larger range for exploration
     particles(p).vel_eta_rep = -2 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min) + ...
@@ -121,11 +201,32 @@ for p = 1:num_particles
         rand() * 4 * (param_bounds.eta_W.log_max - param_bounds.eta_W.log_min);
     particles(p).vel_momentum = -2 * (param_bounds.momentum.max - param_bounds.momentum.min) + ...
         rand() * 4 * (param_bounds.momentum.max - param_bounds.momentum.min);
+    particles(p).vel_decay_L2_goal = -2 * (param_bounds.decay_L2_goal.max - param_bounds.decay_L2_goal.min) + ...
+        rand() * 4 * (param_bounds.decay_L2_goal.max - param_bounds.decay_L2_goal.min);
+    particles(p).vel_decay_L1_motor = -2 * (param_bounds.decay_L1_motor.max - param_bounds.decay_L1_motor.min) + ...
+        rand() * 4 * (param_bounds.decay_L1_motor.max - param_bounds.decay_L1_motor.min);
+    particles(p).vel_motor_gain = -2 * (param_bounds.motor_gain.max - param_bounds.motor_gain.min) + ...
+        rand() * 4 * (param_bounds.motor_gain.max - param_bounds.motor_gain.min);
+    particles(p).vel_damping = -2 * (param_bounds.damping.max - param_bounds.damping.min) + ...
+        rand() * 4 * (param_bounds.damping.max - param_bounds.damping.min);
+    particles(p).vel_reaching_speed_scale = -2 * (param_bounds.reaching_speed_scale.max - param_bounds.reaching_speed_scale.min) + ...
+        rand() * 4 * (param_bounds.reaching_speed_scale.max - param_bounds.reaching_speed_scale.min);
+    particles(p).vel_W_L2_goal_gain = -2 * (param_bounds.W_L2_goal_gain.max - param_bounds.W_L2_goal_gain.min) + ...
+        rand() * 4 * (param_bounds.W_L2_goal_gain.max - param_bounds.W_L2_goal_gain.min);
+    particles(p).vel_W_L1_pos_gain = -2 * (param_bounds.W_L1_pos_gain.max - param_bounds.W_L1_pos_gain.min) + ...
+        rand() * 4 * (param_bounds.W_L1_pos_gain.max - param_bounds.W_L1_pos_gain.min);
     
     % Initialize particle's best position and score
     particles(p).best_eta_rep = particles(p).eta_rep;
     particles(p).best_eta_W = particles(p).eta_W;
     particles(p).best_momentum = particles(p).momentum;
+    particles(p).best_decay_L2_goal = particles(p).decay_L2_goal;
+    particles(p).best_decay_L1_motor = particles(p).decay_L1_motor;
+    particles(p).best_motor_gain = particles(p).motor_gain;
+    particles(p).best_damping = particles(p).damping;
+    particles(p).best_reaching_speed_scale = particles(p).reaching_speed_scale;
+    particles(p).best_W_L2_goal_gain = particles(p).W_L2_goal_gain;
+    particles(p).best_W_L1_pos_gain = particles(p).W_L1_pos_gain;
     particles(p).best_score = inf;
 end
 
@@ -161,15 +262,24 @@ for iteration = 1:num_iterations
     % Evaluate each particle in the swarm
     for p = 1:num_particles
         fprintf('  Particle %d/%d: ', p, num_particles);
-        fprintf('η_rep=%.6f, η_W=%.6f, mom=%.4f\n', ...
-            particles(p).eta_rep, particles(p).eta_W, particles(p).momentum);
+        fprintf('η_rep=%.6f, η_W=%.6f, mom=%.4f, decay=[%.3f,%.3f], mg=%.3f, damp=%.3f, rss=%.3f, w=[%.3f,%.4f]\n', ...
+            particles(p).eta_rep, particles(p).eta_W, particles(p).momentum, ...
+            particles(p).decay_L2_goal, particles(p).decay_L1_motor, ...
+            particles(p).motor_gain, particles(p).damping, particles(p).reaching_speed_scale, ...
+            particles(p).W_L2_goal_gain, particles(p).W_L1_pos_gain);
         
-        % Create parameter struct for this particle
+        % Create parameter struct for this particle (11 total parameters)
         current_params = struct();
         current_params.eta_rep = particles(p).eta_rep;
         current_params.eta_W = particles(p).eta_W;
         current_params.momentum = particles(p).momentum;
-        current_params.weight_decay = particles(p).weight_decay;
+        current_params.decay_L2_goal = particles(p).decay_L2_goal;
+        current_params.decay_L1_motor = particles(p).decay_L1_motor;
+        current_params.motor_gain = particles(p).motor_gain;
+        current_params.damping = particles(p).damping;
+        current_params.reaching_speed_scale = particles(p).reaching_speed_scale;
+        current_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
+        current_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
         
         % --- RUN THE 3D MODEL WITH THESE PARAMETERS ---
         try
@@ -247,6 +357,13 @@ for iteration = 1:num_iterations
             particles(p).best_eta_rep = particles(p).eta_rep;
             particles(p).best_eta_W = particles(p).eta_W;
             particles(p).best_momentum = particles(p).momentum;
+            particles(p).best_decay_L2_goal = particles(p).decay_L2_goal;
+            particles(p).best_decay_L1_motor = particles(p).decay_L1_motor;
+            particles(p).best_motor_gain = particles(p).motor_gain;
+            particles(p).best_damping = particles(p).damping;
+            particles(p).best_reaching_speed_scale = particles(p).reaching_speed_scale;
+            particles(p).best_W_L2_goal_gain = particles(p).W_L2_goal_gain;
+            particles(p).best_W_L1_pos_gain = particles(p).W_L1_pos_gain;
             fprintf('    ★ New personal best: %.6f\n', current_score);
         end
         
@@ -256,7 +373,13 @@ for iteration = 1:num_iterations
             global_best_params.eta_rep = particles(p).eta_rep;
             global_best_params.eta_W = particles(p).eta_W;
             global_best_params.momentum = particles(p).momentum;
-            global_best_params.weight_decay = 0.98;
+            global_best_params.decay_L2_goal = particles(p).decay_L2_goal;
+            global_best_params.decay_L1_motor = particles(p).decay_L1_motor;
+            global_best_params.motor_gain = particles(p).motor_gain;
+            global_best_params.damping = particles(p).damping;
+            global_best_params.reaching_speed_scale = particles(p).reaching_speed_scale;
+            global_best_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
+            global_best_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
             fprintf('    ✯ NEW GLOBAL BEST: %.6f ✯\n', global_best_score);
         end
     end
@@ -308,7 +431,77 @@ for iteration = 1:num_iterations
             c2 * r2 * (global_best_params.momentum - particles(p).momentum) + ...
             noise_momentum;
         
-        % Position update
+        % decay_L2_goal (linear scale)
+        r1 = rand();
+        r2 = rand();
+        decay_L2_range = param_bounds.decay_L2_goal.max - param_bounds.decay_L2_goal.min;
+        noise_decay_L2 = noise_scale * decay_L2_range * randn();
+        particles(p).vel_decay_L2_goal = w * particles(p).vel_decay_L2_goal + ...
+            c1 * r1 * (particles(p).best_decay_L2_goal - particles(p).decay_L2_goal) + ...
+            c2 * r2 * (global_best_params.decay_L2_goal - particles(p).decay_L2_goal) + ...
+            noise_decay_L2;
+        
+        % decay_L1_motor (linear scale)
+        r1 = rand();
+        r2 = rand();
+        decay_L1_range = param_bounds.decay_L1_motor.max - param_bounds.decay_L1_motor.min;
+        noise_decay_L1 = noise_scale * decay_L1_range * randn();
+        particles(p).vel_decay_L1_motor = w * particles(p).vel_decay_L1_motor + ...
+            c1 * r1 * (particles(p).best_decay_L1_motor - particles(p).decay_L1_motor) + ...
+            c2 * r2 * (global_best_params.decay_L1_motor - particles(p).decay_L1_motor) + ...
+            noise_decay_L1;
+        
+        % motor_gain (linear scale)
+        r1 = rand();
+        r2 = rand();
+        motor_gain_range = param_bounds.motor_gain.max - param_bounds.motor_gain.min;
+        noise_motor_gain = noise_scale * motor_gain_range * randn();
+        particles(p).vel_motor_gain = w * particles(p).vel_motor_gain + ...
+            c1 * r1 * (particles(p).best_motor_gain - particles(p).motor_gain) + ...
+            c2 * r2 * (global_best_params.motor_gain - particles(p).motor_gain) + ...
+            noise_motor_gain;
+        
+        % damping (linear scale)
+        r1 = rand();
+        r2 = rand();
+        damping_range = param_bounds.damping.max - param_bounds.damping.min;
+        noise_damping = noise_scale * damping_range * randn();
+        particles(p).vel_damping = w * particles(p).vel_damping + ...
+            c1 * r1 * (particles(p).best_damping - particles(p).damping) + ...
+            c2 * r2 * (global_best_params.damping - particles(p).damping) + ...
+            noise_damping;
+        
+        % reaching_speed_scale (linear scale)
+        r1 = rand();
+        r2 = rand();
+        rss_range = param_bounds.reaching_speed_scale.max - param_bounds.reaching_speed_scale.min;
+        noise_rss = noise_scale * rss_range * randn();
+        particles(p).vel_reaching_speed_scale = w * particles(p).vel_reaching_speed_scale + ...
+            c1 * r1 * (particles(p).best_reaching_speed_scale - particles(p).reaching_speed_scale) + ...
+            c2 * r2 * (global_best_params.reaching_speed_scale - particles(p).reaching_speed_scale) + ...
+            noise_rss;
+        
+        % W_L2_goal_gain (linear scale)
+        r1 = rand();
+        r2 = rand();
+        wl2_range = param_bounds.W_L2_goal_gain.max - param_bounds.W_L2_goal_gain.min;
+        noise_wl2 = noise_scale * wl2_range * randn();
+        particles(p).vel_W_L2_goal_gain = w * particles(p).vel_W_L2_goal_gain + ...
+            c1 * r1 * (particles(p).best_W_L2_goal_gain - particles(p).W_L2_goal_gain) + ...
+            c2 * r2 * (global_best_params.W_L2_goal_gain - particles(p).W_L2_goal_gain) + ...
+            noise_wl2;
+        
+        % W_L1_pos_gain (linear scale)
+        r1 = rand();
+        r2 = rand();
+        wl1_range = param_bounds.W_L1_pos_gain.max - param_bounds.W_L1_pos_gain.min;
+        noise_wl1 = noise_scale * wl1_range * randn();
+        particles(p).vel_W_L1_pos_gain = w * particles(p).vel_W_L1_pos_gain + ...
+            c1 * r1 * (particles(p).best_W_L1_pos_gain - particles(p).W_L1_pos_gain) + ...
+            c2 * r2 * (global_best_params.W_L1_pos_gain - particles(p).W_L1_pos_gain) + ...
+            noise_wl1;
+        
+        % Position updates
         % For log-scale parameters, position is updated on log scale then converted
         log_eta_rep_new = log10(particles(p).eta_rep) + particles(p).vel_eta_rep;
         particles(p).eta_rep = 10^log_eta_rep_new;
@@ -317,14 +510,35 @@ for iteration = 1:num_iterations
         particles(p).eta_W = 10^log_eta_W_new;
         
         particles(p).momentum = particles(p).momentum + particles(p).vel_momentum;
+        particles(p).decay_L2_goal = particles(p).decay_L2_goal + particles(p).vel_decay_L2_goal;
+        particles(p).decay_L1_motor = particles(p).decay_L1_motor + particles(p).vel_decay_L1_motor;
+        particles(p).motor_gain = particles(p).motor_gain + particles(p).vel_motor_gain;
+        particles(p).damping = particles(p).damping + particles(p).vel_damping;
+        particles(p).reaching_speed_scale = particles(p).reaching_speed_scale + particles(p).vel_reaching_speed_scale;
+        particles(p).W_L2_goal_gain = particles(p).W_L2_goal_gain + particles(p).vel_W_L2_goal_gain;
+        particles(p).W_L1_pos_gain = particles(p).W_L1_pos_gain + particles(p).vel_W_L1_pos_gain;
         
-        % Enforce bounds
+        % Enforce bounds on all parameters
         particles(p).eta_rep = max(10^param_bounds.eta_rep.log_min, ...
                                    min(10^param_bounds.eta_rep.log_max, particles(p).eta_rep));
         particles(p).eta_W = max(10^param_bounds.eta_W.log_min, ...
                                 min(10^param_bounds.eta_W.log_max, particles(p).eta_W));
         particles(p).momentum = max(param_bounds.momentum.min, ...
                                    min(param_bounds.momentum.max, particles(p).momentum));
+        particles(p).decay_L2_goal = max(param_bounds.decay_L2_goal.min, ...
+                                        min(param_bounds.decay_L2_goal.max, particles(p).decay_L2_goal));
+        particles(p).decay_L1_motor = max(param_bounds.decay_L1_motor.min, ...
+                                         min(param_bounds.decay_L1_motor.max, particles(p).decay_L1_motor));
+        particles(p).motor_gain = max(param_bounds.motor_gain.min, ...
+                                     min(param_bounds.motor_gain.max, particles(p).motor_gain));
+        particles(p).damping = max(param_bounds.damping.min, ...
+                                  min(param_bounds.damping.max, particles(p).damping));
+        particles(p).reaching_speed_scale = max(param_bounds.reaching_speed_scale.min, ...
+                                              min(param_bounds.reaching_speed_scale.max, particles(p).reaching_speed_scale));
+        particles(p).W_L2_goal_gain = max(param_bounds.W_L2_goal_gain.min, ...
+                                         min(param_bounds.W_L2_goal_gain.max, particles(p).W_L2_goal_gain));
+        particles(p).W_L1_pos_gain = max(param_bounds.W_L1_pos_gain.min, ...
+                                        min(param_bounds.W_L1_pos_gain.max, particles(p).W_L1_pos_gain));
     end
 end
 
@@ -337,12 +551,22 @@ fprintf('═══════════════════════�
 fprintf('PSO OPTIMIZATION COMPLETE\n');
 fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
-fprintf('Best Parameters Found:\n');
+fprintf('Best Parameters Found (11-DIMENSIONAL OPTIMIZATION):\n');
 fprintf('  Score (weighted objective):  %.6f\n', global_best_score);
-fprintf('  eta_rep:                     %.6f\n', global_best_params.eta_rep);
-fprintf('  eta_W:                       %.6f\n', global_best_params.eta_W);
-fprintf('  momentum:                    %.6f\n', global_best_params.momentum);
-fprintf('  weight_decay (FIXED):        %.6f\n\n', global_best_params.weight_decay);
+fprintf('\n  LEARNING RATES:\n');
+fprintf('    eta_rep:                   %.6f\n', global_best_params.eta_rep);
+fprintf('    eta_W:                     %.6f\n', global_best_params.eta_W);
+fprintf('    momentum:                  %.6f\n', global_best_params.momentum);
+fprintf('\n  WEIGHT DECAY (trial transfer):\n');
+fprintf('    decay_L2_goal:             %.6f\n', global_best_params.decay_L2_goal);
+fprintf('    decay_L1_motor:            %.6f\n', global_best_params.decay_L1_motor);
+fprintf('\n  MOTOR DYNAMICS (trajectory quality):\n');
+fprintf('    motor_gain:                %.6f\n', global_best_params.motor_gain);
+fprintf('    damping:                   %.6f\n', global_best_params.damping);
+fprintf('    reaching_speed_scale:      %.6f\n', global_best_params.reaching_speed_scale);
+fprintf('\n  WEIGHT INITIALIZATION (convergence speed):\n');
+fprintf('    W_L2_goal_gain:            %.6f\n', global_best_params.W_L2_goal_gain);
+fprintf('    W_L1_pos_gain:             %.6f\n\n', global_best_params.W_L1_pos_gain);
 
 % Create results struct for saving
 results = struct();
