@@ -1,4 +1,4 @@
-function [] = hierarchical_motion_inference_dual_hierarchy(params, make_plots)
+function results = hierarchical_motion_inference_dual_hierarchy(params, make_plots)
     % DUAL-HIERARCHY PREDICTIVE CODING MODEL
     % ========================================================================
     % Motor Region: Learns stable forward models (how commands produce motion)
@@ -80,6 +80,14 @@ end
 dt = 0.01;              % Time step (s)
 T_per_trial = 4000;      % Duration per trial (s)
 n_trials = 4;           % Number of different ball trajectories
+
+% Allow overriding of timing parameters via params for faster debug runs or PSO
+if nargin > 0 && isstruct(params)
+    if isfield(params, 'dt'), dt = params.dt; end
+    if isfield(params, 'T_per_trial'), T_per_trial = params.T_per_trial; end
+    if isfield(params, 'n_trials'), n_trials = params.n_trials; end
+end
+
 T = T_per_trial * n_trials;  % Total duration
 t = 0:dt:T;
 N = length(t);
@@ -979,33 +987,53 @@ fprintf('\n✓ Main loop complete (%d iterations executed)\n\n', N-1);
 % SAVE RESULTS
 % ====================================================================
 
-fprintf('Saving results...\n');
-
-output_dir = './figures';
-if ~exist(output_dir, 'dir')
-    mkdir(output_dir);
-end
-
-% Interception error metric
+% Prepare results struct (always returned)
 interception_error_all = interception_error_all(1:N);
 
-try
-    results_filename = fullfile(output_dir, '3D_dual_hierarchy_results.mat');
-    save(results_filename, 'x_player', 'y_player', 'z_player', 'vx_player', 'vy_player', 'vz_player', ...
-        'x_ball', 'y_ball', 'z_ball', 'vx_ball', 'vy_ball', 'vz_ball', ...
-        'R_L0', 'R_L1_motor', 'R_L2_motor', 'R_L3_motor', ...
-        'R_L1_plan', 'R_L2_plan', 'R_L3_plan', ...
-        'interception_error_all', 'free_energy_all', 'phases_indices', ...
-        'W_motor_L2_to_L1', 'W_motor_L3_to_L2', 'W_plan_L2_to_L1', 'W_plan_L3_to_L2', ...
-        'W_motor_L1_lat', 'W_motor_L2_lat', 'W_motor_L3_lat', ...
-        'W_plan_L1_lat',  'W_plan_L2_lat',  'W_plan_L3_lat', ...
-        'learning_trace_W', ...
-        'pi_trace_L1_motor', 'pi_trace_L2_motor', 'pi_trace_L1_plan', 'pi_trace_L2_plan', ...
-        'pi_raw_trace_L1_motor', 'pi_raw_trace_L2_motor', 'pi_raw_trace_L1_plan', 'pi_raw_trace_L2_plan', ...
-        'denom_trace_L1_motor', 'denom_trace_L2_motor', 'denom_trace_L1_plan', 'denom_trace_L2_plan', '-v7.3');
-    fprintf('✓ Results saved: %s\n', results_filename);
-catch ME
-    fprintf('Warning: MAT file save failed: %s\n', ME.message);
+results = struct();
+results.x_player = x_player; results.y_player = y_player; results.z_player = z_player;
+results.vx_player = vx_player; results.vy_player = vy_player; results.vz_player = vz_player;
+results.x_ball = x_ball; results.y_ball = y_ball; results.z_ball = z_ball;
+results.vx_ball = vx_ball; results.vy_ball = vy_ball; results.vz_ball = vz_ball;
+results.R_L0 = R_L0;
+results.R_L1_motor = R_L1_motor; results.R_L2_motor = R_L2_motor; results.R_L3_motor = R_L3_motor;
+results.R_L1_plan = R_L1_plan; results.R_L2_plan = R_L2_plan; results.R_L3_plan = R_L3_plan;
+results.interception_error_all = interception_error_all;
+results.free_energy_all = free_energy_all;
+results.phases_indices = phases_indices;
+results.W_motor_L2_to_L1 = W_motor_L2_to_L1; results.W_motor_L3_to_L2 = W_motor_L3_to_L2;
+results.W_plan_L2_to_L1 = W_plan_L2_to_L1; results.W_plan_L3_to_L2 = W_plan_L3_to_L2;
+results.W_motor_L1_lat = W_motor_L1_lat; results.W_motor_L2_lat = W_motor_L2_lat; results.W_motor_L3_lat = W_motor_L3_lat;
+results.W_plan_L1_lat = W_plan_L1_lat; results.W_plan_L2_lat = W_plan_L2_lat; results.W_plan_L3_lat = W_plan_L3_lat;
+results.learning_trace_W = learning_trace_W;
+results.pi_trace_L1_motor = pi_trace_L1_motor; results.pi_trace_L2_motor = pi_trace_L2_motor;
+results.pi_trace_L1_plan = pi_trace_L1_plan; results.pi_trace_L2_plan = pi_trace_L2_plan;
+results.pi_raw_trace_L1_motor = pi_raw_trace_L1_motor; results.pi_raw_trace_L2_motor = pi_raw_trace_L2_motor;
+results.pi_raw_trace_L1_plan = pi_raw_trace_L1_plan; results.pi_raw_trace_L2_plan = pi_raw_trace_L2_plan;
+results.denom_trace_L1_motor = denom_trace_L1_motor; results.denom_trace_L2_motor = denom_trace_L2_motor;
+results.denom_trace_L1_plan = denom_trace_L1_plan; results.denom_trace_L2_plan = denom_trace_L2_plan;
+
+% Decide whether to save a MAT file to disk. Default: true (backwards compatible).
+save_results = true;
+if nargin > 0 && isstruct(params) && isfield(params, 'save_results')
+    save_results = params.save_results;
+end
+
+output_dir = './figures';
+if save_results
+    fprintf('Saving results...\n');
+    if ~exist(output_dir, 'dir')
+        mkdir(output_dir);
+    end
+    try
+        results_filename = fullfile(output_dir, '3D_dual_hierarchy_results.mat');
+        save(results_filename, '-struct', 'results', '-v7.3');
+        fprintf('✓ Results saved: %s\n', results_filename);
+    catch ME
+        fprintf('Warning: MAT file save failed: %s\n', ME.message);
+    end
+else
+    fprintf('Skipping MAT-file save (params.save_results=false). Returning results struct only.\n');
 end
 
 % ====================================================================

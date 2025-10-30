@@ -13,61 +13,94 @@ fprintf('╔══════════════════════�
 fprintf('║  ANALYSIS OF TOP OPTIMIZATION RESULTS                       ║\n');
 fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
 
-% --- 1. Load the most recent optimization results file ---
-fprintf('Searching for optimization results file...\n');
-result_files = dir('./optimization_results/rao_ballard_3D_optimization_*.mat');
-
-if isempty(result_files)
-    error('No optimization results file found. Please run "optimize_rao_ballard_parameters.m" first.');
+% --- 1. Load PSO top-20 leaderboard (preferred) or fallback to older optimization results ---
+fprintf('Searching for PSO leaderboard (./figures/pso_top20_best_params.mat)...\n');
+leader_file = fullfile('./figures', 'pso_top20_best_params.mat');
+if isfile(leader_file)
+    fprintf('Found leaderboard file: %s\n\n', leader_file);
+    S = load(leader_file, 'leader_list');
+    leader_list = S.leader_list;
+    use_leader_list = true;
+else
+    fprintf('Leaderboard file not found, falling back to legacy optimization results in ./optimization_results/...\n');
+    result_files = dir('./optimization_results/rao_ballard_3D_optimization_*.mat');
+    if isempty(result_files)
+        error('No optimization results file or PSO leaderboard found. Please run PSO first.');
+    end
+    [~, latest_idx] = max([result_files.datenum]);
+    results_filename = fullfile(result_files(latest_idx).folder, result_files(latest_idx).name);
+    fprintf('Loading legacy optimization results from: %s\n\n', results_filename);
+    load(results_filename, 'results'); % Loads the 'results' struct
+    use_leader_list = false;
 end
 
-% Find the most recent file by date
-[~, latest_idx] = max([result_files.datenum]);
-results_filename = result_files(latest_idx).name;
+if use_leader_list
+    % leader_list is a struct array with fields: score, params
+    n_leader = numel(leader_list);
+    num_to_display = min(20, n_leader);
+    if num_to_display == 0
+        fprintf('Leaderboard is empty.\n');
+        return;
+    end
 
-fprintf('Loading data from: %s\n\n', results_filename);
-load(results_filename, 'results'); % Loads the 'results' struct
+    fprintf('Displaying Top %d PSO Parameter Sets (from %s):\n', num_to_display, leader_file);
+    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
+    fprintf('%-5s | %-12s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s\n', ...
+        'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum', 'decay_L2', 'decay_L1', 'motor_gain', 'damping', 'reach_scale', 'W_L2');
+    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
 
-% --- 2. Find the top 3 parameter sets ---
-% Sort the results by score in ascending order
-[sorted_scores, sorted_indices] = sort(results.score, 'ascend');
-
-% Determine how many top results to show (up to 20)
-num_valid_results = sum(~isinf(sorted_scores));
-num_to_display = min(20, num_valid_results);
-
-if num_to_display == 0
-    fprintf('No valid (non-infinite score) results found in the data file.\n');
-    return;
+    for i = 1:num_to_display
+        sc = leader_list(i).score;
+        p = leader_list(i).params;
+        fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f\n', ...
+            i, sc, p.eta_rep, p.eta_W, p.momentum, p.decay_L2_goal, p.decay_L1_motor, p.motor_gain, p.damping, p.reaching_speed_scale, p.W_L2_goal_gain);
+    end
+    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n\n');
+    fprintf('Analysis complete.\n');
+else
+    % Legacy results struct handling (best-effort mapping)
+    if ~isfield(results, 'top20') && ~isfield(results, 'score')
+        % Try to construct a score / params list from results.particles (personal bests)
+        fprintf('Legacy results detected: constructing leaderboard from particles.personal bests...\n');
+        num_particles = numel(results.particles);
+        all_scores = inf(num_particles,1);
+        for pp = 1:num_particles
+            if isfield(results.particles(pp), 'best_score')
+                all_scores(pp) = results.particles(pp).best_score;
+            end
+        end
+        [sorted_scores, sorted_idx] = sort(all_scores, 'ascend');
+        valid_mask = isfinite(sorted_scores);
+        num_to_display = min(20, sum(valid_mask));
+        fprintf('Displaying Top %d (constructed from particles)\n', num_to_display);
+        fprintf('════════════════════════════════════════════════════════════════\n');
+        fprintf('%-5s | %-12s | %-10s | %-10s | %-10s\n', 'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum');
+        fprintf('════════════════════════════════════════════════════════════════\n');
+        for i = 1:num_to_display
+            ip = sorted_idx(i);
+            sc = sorted_scores(i);
+            p = results.particles(ip);
+            fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f\n', i, sc, p.best_eta_rep, p.best_eta_W, p.best_momentum);
+        end
+        fprintf('════════════════════════════════════════════════════════════════\n\n');
+    else
+        % If results.top20 exists (some older scripts), prefer it
+        if isfield(results, 'top20')
+            leader_list = results.top20;
+            n_leader = numel(leader_list);
+            num_to_display = min(20, n_leader);
+            fprintf('Displaying Top %d Parameter Sets (from results.top20):\n', num_to_display);
+            fprintf('════════════════════════════════════════════════════════════════\n');
+            fprintf('%-5s | %-12s | %-10s | %-10s | %-10s\n', 'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum');
+            fprintf('════════════════════════════════════════════════════════════════\n');
+            for i = 1:num_to_display
+                sc = leader_list(i).score;
+                p = leader_list(i).params;
+                fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f\n', i, sc, p.eta_rep, p.eta_W, p.momentum);
+            end
+            fprintf('════════════════════════════════════════════════════════════════\n\n');
+        else
+            error('Cannot interpret legacy results structure. Please run PSO or convert results.');
+        end
+    end
 end
-
-fprintf('Displaying Top %d Parameter Sets:\n', num_to_display);
-fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
-fprintf('%-5s | %-12s | %-12s | %-12s | %-12s | %-12s | %-12s | %-12s\n', ...
-    'Rank', 'Score', 'Reach Dist', 'Pos RMSE', 'eta_rep', 'eta_W', 'Momentum', 'Weight Decay');
-fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
-
-% --- 3. Display the details of the top sets ---
-for i = 1:num_to_display
-    % Get the index for the i-th best result
-    idx = sorted_indices(i);
-    
-    % Extract the data for this rank
-    score = results.score(idx);
-    params = results.params(idx);
-    errors = results.errors(idx);
-    
-    % Print the formatted row
-    fprintf('%-5d | %-12.4f | %-12.4f | %-12.4f | %-12.6f | %-12.6f | %-12.4f | %-12.4f\n', ...
-        i, ...
-        score, ...
-        errors.reaching_dist, ...
-        errors.pos_rmse, ...
-        params.eta_rep, ...
-        params.eta_W, ...
-        params.momentum, ...
-        params.weight_decay);
-end
-
-fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n\n');
-fprintf('Analysis complete.\n');

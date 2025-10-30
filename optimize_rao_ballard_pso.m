@@ -25,9 +25,9 @@ fprintf('╚══════════════════════�
 num_particles = 20;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 30;  % Each iteration = all particles tested
+num_iterations = 20;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 600 trials
+% Total evaluations will be: num_particles * num_iterations = 400 trials
 total_evals = num_particles * num_iterations;
 
 fprintf('PSO CONFIGURATION:\n');
@@ -251,6 +251,13 @@ iteration_history.best_scores = [];
 iteration_history.avg_scores = [];
 iteration_history.best_params_history = [];
 
+% Quick debug mode: when true, PSO runs use short trials (fast) so you can validate
+% the optimization loop without waiting for full-length simulations. Set to false
+% to run the full-duration model during PSO (much slower).
+fast_debug_mode = true;    % <-- set to false for full/production PSO runs
+debug_T_per_trial = 2.5;   % seconds per trial for fast debug mode (2.5s -> ~250 steps at dt=0.01)
+debug_dt = 0.02;           % larger dt for faster debug runs
+
 for iteration = 1:num_iterations
     fprintf('\n╔════════════════════════════════════════════════════════════╗\n');
     fprintf('║ PSO Iteration %d/%d (Evaluating %d particles)              ║\n', ...
@@ -288,7 +295,7 @@ for iteration = 1:num_iterations
             set(0, 'DefaultFigureVisible', 'off');
 
             % Run the dual-hierarchy model with parameters and NO plotting (for speed)
-            % Call signature: hierarchical_motion_inference_dual_hierarchy(params, make_plots)
+            % Call signature: results = hierarchical_motion_inference_dual_hierarchy(params, make_plots)
             % Map PSO parameter names to the dual-hierarchy expected names
             dh_params = struct();
             dh_params.eta_rep = current_params.eta_rep;
@@ -302,26 +309,24 @@ for iteration = 1:num_iterations
             dh_params.reaching_speed_scale = current_params.reaching_speed_scale;
             dh_params.W_plan_gain = current_params.W_L2_goal_gain;
             dh_params.W_motor_gain = current_params.W_L1_pos_gain;
-
-            hierarchical_motion_inference_dual_hierarchy(dh_params, false);
+            % If in fast debug mode, override trial length and timestep to speed up evaluation
+            if exist('fast_debug_mode','var') && fast_debug_mode
+                dh_params.T_per_trial = debug_T_per_trial;
+                dh_params.dt = debug_dt;
+            end
+            % Avoid writing a full MAT for each particle; request only returned struct
+            dh_params.save_results = false;
+            loaded_data = hierarchical_motion_inference_dual_hierarchy(dh_params, false);
 
             % Restore visibility
             set(0, 'DefaultFigureVisible', old_visible);
 
-            % Load results from the dual-hierarchy results MAT file
-            results_file = './figures/3D_dual_hierarchy_results.mat';
-            if ~isfile(results_file)
-                error('Expected results file not found: %s', results_file);
+            % Validate returned struct
+            if ~isstruct(loaded_data) || ~isfield(loaded_data, 'interception_error_all') || ~isfield(loaded_data, 'phases_indices')
+                error('Dual-hierarchy did not return expected results struct (interception_error_all, phases_indices)');
             end
-            loaded_data = load(results_file);
-
-            % Extract variables from loaded data (dual-hierarchy naming)
-            if isfield(loaded_data, 'interception_error_all') && isfield(loaded_data, 'phases_indices')
-                interception_error_all = loaded_data.interception_error_all;
-                phases_indices = loaded_data.phases_indices;
-            else
-                error('Results file missing expected variables (interception_error_all, phases_indices)');
-            end
+            interception_error_all = loaded_data.interception_error_all;
+            phases_indices = loaded_data.phases_indices;
 
         catch ME
             fprintf('    ✗ Simulation failed: %s\n', ME.message);
@@ -337,16 +342,35 @@ for iteration = 1:num_iterations
         trial_reaching_dists = {};
         for t = 1:n_trials_model
             trial_idx = phases_indices{t};
-            trial_reaching_dists{t} = reaching_error_all(trial_idx(end));
+            %trial_reaching_dists{t} = reaching_error_all(trial_idx(end));
+            trial_reaching_dists{t} = interception_error_all(trial_idx(end));
         end
         
         avg_final_reaching_dist = mean([trial_reaching_dists{:}]);
         
         % Calculate position RMSE for secondary metric
-        pos_error_trial = sqrt((x_true - R_L1(:,1)').^2 + ...
-                              (y_true - R_L1(:,2)').^2 + ...
-                              (z_true - R_L1(:,3)').^2);
-        pos_rmse_trial = sqrt(mean(pos_error_trial.^2));
+        % Safe computation using saved player vs ball trajectories (fallbacks if missing)
+        pos_rmse_trial = 0;
+        try
+            if isfield(loaded_data, 'x_player') && isfield(loaded_data, 'x_ball') && isfield(loaded_data, 'phases_indices')
+                % compute RMSE across all trials/timepoints (or per-trial below if needed)
+                xp = loaded_data.x_player(:);
+                yp = loaded_data.y_player(:);
+                zp = loaded_data.z_player(:);
+                xb = loaded_data.x_ball(:);
+                yb = loaded_data.y_ball(:);
+                zb = loaded_data.z_ball(:);
+                % compute Euclidean distance per timestep and RMSE over whole run
+                dists = sqrt( (xp - xb).^2 + (yp - yb).^2 + (zp - zb).^2 );
+                pos_rmse_trial = sqrt(mean(dists.^2));
+            else
+                warning('Loaded results missing player/ball trajectories; setting pos_rmse_trial = 0');
+                pos_rmse_trial = 0;
+            end
+        catch
+            warning('Error computing pos RMSE from results; setting pos_rmse_trial = 0');
+            pos_rmse_trial = 0;
+        end
         
         % Check for NaN or Inf
         if isnan(avg_final_reaching_dist) || isinf(avg_final_reaching_dist) || ...
@@ -355,8 +379,9 @@ for iteration = 1:num_iterations
             current_score = inf;
         else
             % Objective: minimize reaching distance (primary) and position error (secondary)
-            current_score = objective_weights.reaching_distance * avg_final_reaching_dist + ...
-                           objective_weights.position_rmse * pos_rmse_trial;
+            %current_score = objective_weights.reaching_distance * avg_final_reaching_dist + ...
+            %               objective_weights.position_rmse * pos_rmse_trial;
+            current_score = mean(interception_error_all(trial_idx));
         end
         
         particles(p).score = current_score;
@@ -395,6 +420,16 @@ for iteration = 1:num_iterations
             global_best_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
             global_best_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
             fprintf('    ✯ NEW GLOBAL BEST: %.6f ✯\n', global_best_score);
+            % Save the returned results struct for the new global best (one copy only)
+            try
+                out_dir = './figures';
+                if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+                best_fname = fullfile(out_dir, '3D_dual_hierarchy_results_best.mat');
+                save(best_fname, '-struct', 'loaded_data', '-v7.3');
+                fprintf('    ✓ Best results saved: %s\n', best_fname);
+            catch ME
+                fprintf('    Warning: failed to save best results: %s\n', ME.message);
+            end
         end
     end
     
@@ -595,6 +630,53 @@ results.total_evaluations = total_evals;
 results.pso_inertia_weight = w;
 results.pso_cognitive = c1;
 results.pso_social = c2;
+
+% ====================================================================
+% BUILD TOP-20 LEADERBOARD (from particle personal bests)
+% ====================================================================
+try
+    n_leader = min(20, num_particles);
+    % Collect personal bests
+    all_scores = zeros(num_particles,1);
+    for pp = 1:num_particles
+        all_scores(pp) = particles(pp).best_score;
+    end
+    [sorted_scores, idx] = sort(all_scores, 'ascend');
+    % Determine how many valid (finite) bests we have
+    valid_mask = isfinite(sorted_scores);
+    top_n = min(n_leader, sum(valid_mask));
+
+    leader_list = struct('score', cell(top_n,1), 'params', cell(top_n,1));
+    for k = 1:top_n
+        ip = idx(k);
+        ps = struct();
+        ps.eta_rep = particles(ip).best_eta_rep;
+        ps.eta_W = particles(ip).best_eta_W;
+        ps.momentum = particles(ip).best_momentum;
+        ps.decay_L2_goal = particles(ip).best_decay_L2_goal;
+        ps.decay_L1_motor = particles(ip).best_decay_L1_motor;
+        ps.motor_gain = particles(ip).best_motor_gain;
+        ps.damping = particles(ip).best_damping;
+        ps.reaching_speed_scale = particles(ip).best_reaching_speed_scale;
+        ps.W_L2_goal_gain = particles(ip).best_W_L2_goal_gain;
+        ps.W_L1_pos_gain = particles(ip).best_W_L1_pos_gain;
+
+        leader_list(k).score = sorted_scores(k);
+        leader_list(k).params = ps;
+    end
+
+    % Attach to results
+    results.top20 = leader_list;
+
+    % Save leaderboard to figures dir
+    out_dir = './figures';
+    if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+    top_fname = fullfile(out_dir, 'pso_top20_best_params.mat');
+    save(top_fname, 'leader_list');
+    fprintf('✓ Top %d PSO parameter sets saved: %s\n', top_n, top_fname);
+catch ME
+    fprintf('Warning: failed to build/save top-20 leaderboard: %s\n', ME.message);
+end
 
 % Save results with timestamp
 timestamp = datestr(now, 'yyyy-mm-dd_HH-MM-SS');
