@@ -143,6 +143,26 @@ fprintf('  Momentum = %.4f\n', momentum);
 fprintf('  Weight Decay = %.4f\n', weight_decay);
 fprintf('  π_L1  = %.0f, π_L2  = %.0f, π_L3  = %.0f\n\n', pi_L1, pi_L2, pi_L3);
 
+fprintf('HIERARCHICAL PREDICTIVE CODING WITH ACTIVE INFERENCE:\n');
+fprintf('─────────────────────────────────────────────────────────────\n');
+fprintf('L3 (Goal): ACTIVE INFERENCE NODE\n');
+fprintf('  • NOT clamped to task target (varies over time)\n');
+fprintf('  • Infers goal from proprioceptive errors (bottom-up)\n');
+fprintf('  • Pulled toward task target by soft constraint (top-down)\n');
+fprintf('  • Creates continuous prediction errors for learning\n');
+fprintf('  • Enables generalization across phase transitions\n\n');
+fprintf('L2 (Motor Basis): Learned motor primitives\n');
+fprintf('  • Learns to predict motor commands from goal\n');
+fprintf('  • Updated via proprioceptive coupling errors\n\n');
+fprintf('L1 (Proprioception): Sensory prediction layer\n');
+fprintf('  • Predicts position and velocity from motor commands\n');
+fprintf('  • Compared against actual sensory input\n');
+fprintf('  • Generates error signals that drive learning\n');
+fprintf('  η_W   = %.6f (weight matrix learning rate)\n', eta_W);
+fprintf('  Momentum = %.4f\n', momentum);
+fprintf('  Weight Decay = %.4f\n', weight_decay);
+fprintf('  π_L1  = %.0f, π_L2  = %.0f, π_L3  = %.0f\n\n', pi_L1, pi_L2, pi_L3);
+
 % ====================================================================
 % INITIALIZE REPRESENTATIONS (3D)
 % ====================================================================
@@ -281,11 +301,15 @@ for i = 1:N-1
     end
     
     % ==============================================================
-    % STEP 0: UPDATE GOAL (TASK INPUT)
+    % STEP 0: GOAL REPRESENTATION (ACTIVE INFERENCE - L3)
     % ==============================================================
-    % Goal is externally specified and clamped (like visual target in 3D)
-    R_L3(i,1:3) = targets(current_trial,:);  % CLAMP: Task provides 3D target
-    R_L3(i,4) = 1;  % Bias
+    % L3 is NOT clamped but inferred from proprioceptive error
+    % This allows learning to persist across phase transitions
+    
+    % Task signal: preferred target for this trial (soft constraint)
+    task_target = targets(current_trial, :);
+    
+    % L3 starts at current value (will be updated based on errors below)
     
     % ==============================================================
     % STEP 1: MOTOR COMMAND GENERATION (Top-Down: L3 → L2 → L1)
@@ -397,6 +421,30 @@ for i = 1:N-1
     delta_R_L2 = coupling_from_L1 - E_L2(i,:);  % Proprioceptive coupling vs motor error
     R_L2(i+1,:) = momentum * R_L2(i,:) + decay * eta_rep * delta_R_L2 * 0.5;
     R_L2(i+1,:) = max(-1, min(1, R_L2(i+1,:)));  % Bounds [-1, 1]
+    
+    % L3: ACTIVE INFERENCE NODE
+    % Learn goal from motor error (bottom-up) while respecting task constraint (top-down)
+    % Motor error E_L2 indicates goal should move to better predict motor commands
+    
+    % Error-driven goal update: minimize motor prediction error
+    % If E_L2 is large, it means L3's prediction doesn't match actual L2
+    % So update L3 to better match the errors
+    E_L3_from_motor = E_L2(i,:) * W_L2_from_L3';  % Back-project motor error to goal space
+    
+    % Update L3 position to reduce motor errors
+    goal_correction = E_L3_from_motor(1:3) * 0.2;  % How much to move goal
+    R_L3(i+1, 1:3) = R_L3(i, 1:3) + eta_rep * goal_correction;
+    
+    % Soft constraint: pull L3 toward task target (doesn't fully clamp it)
+    target_attraction = (task_target - R_L3(i+1, 1:3)) * 0.3;
+    R_L3(i+1, 1:3) = R_L3(i+1, 1:3) + eta_rep * target_attraction;
+    
+    % Keep L3 in workspace bounds
+    R_L3(i+1, 1:3) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), R_L3(i+1,1)));
+    R_L3(i+1, 2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), R_L3(i+1,2)));
+    R_L3(i+1, 3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), R_L3(i+1,3)));
+    
+    R_L3(i+1, 4) = 1;  % Bias fixed
     
     % ==============================================================
     % STEP 7: WEIGHT LEARNING (Hebbian Rule - 3D)
