@@ -107,28 +107,35 @@ for trial = 1:num_trials
     
     % --- 2. Run the simulation with these parameters ---
     try
-        % Call the 3D hierarchical motion inference model
-        % Set optimizer flag to suppress verbose output
-        optimizer_mode = true;
-        
-        % Set parameters in workspace
-        eta_rep = current_params.eta_rep;
-        eta_W = current_params.eta_W;
-        momentum = current_params.momentum;
-        weight_decay = current_params.weight_decay;
-        
+        % Call the 3D hierarchical motion inference model with parameters struct
         % Turn off graphics
         old_visible = get(0, 'DefaultFigureVisible');
         set(0, 'DefaultFigureVisible', 'off');
         
-        % Run the 3D model with parameters overridden
-        % Use evalc to suppress all output
-        evalc('hierarchical_motion_inference_3D_EXACT');
+        % Run the 3D model with parameters passed as struct
+        % The function signature: hierarchical_motion_inference_3D_EXACT(params)
+        % will extract eta_rep, eta_W, momentum, weight_decay from the struct
+        hierarchical_motion_inference_3D_EXACT(current_params);
         
         % Restore visibility
         set(0, 'DefaultFigureVisible', old_visible);
         
-        % The script populates: x_true, y_true, z_true, R_L1, phases_indices, targets, reaching_error_all
+        % Load results from the saved MAT file
+        % (The 3D script saves to ./figures/3D_reaching_results.mat)
+        results_file = './figures/3D_reaching_results.mat';
+        if ~isfile(results_file)
+            error('Expected results file not found: %s', results_file);
+        end
+        loaded_data = load(results_file);
+        
+        % Extract variables from loaded data
+        x_true = loaded_data.x_true;
+        y_true = loaded_data.y_true;
+        z_true = loaded_data.z_true;
+        R_L1 = loaded_data.R_L1;
+        reaching_error_all = loaded_data.reaching_error_all;
+        phases_indices = loaded_data.phases_indices;
+        targets = loaded_data.targets;
         
     catch ME
         fprintf('  ✗ Simulation failed for this parameter set: %s\n', ME.message);

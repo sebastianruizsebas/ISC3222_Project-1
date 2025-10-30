@@ -1,3 +1,22 @@
+function [] = hierarchical_motion_inference_3D_EXACT(params)
+    % Wrapper function to accept optional parameters from optimizer
+    % Usage:
+    %   hierarchical_motion_inference_3D_EXACT()           % Run with defaults
+    %   hierarchical_motion_inference_3D_EXACT(params)     % Run with custom params
+    %
+    % params structure: struct with fields eta_rep, eta_W, momentum, weight_decay
+    
+    if nargin > 0 && isstruct(params)
+        % Override defaults with provided parameters
+        if isfield(params, 'eta_rep'), eta_rep = params.eta_rep; end
+        if isfield(params, 'eta_W'), eta_W = params.eta_W; end
+        if isfield(params, 'momentum'), momentum = params.momentum; end
+        if isfield(params, 'weight_decay'), weight_decay = params.weight_decay; end
+        optimizer_mode = true;
+    else
+        optimizer_mode = false;
+    end
+
 fprintf('╔═════════════════════════════════════════════════════════════╗\n');
 fprintf('║  SENSORIMOTOR LEARNING: 3D REACHING & GRASPING             ║\n');
 fprintf('║  Learning to Reach Targets in 3D Space via Predictive Coding ║\n');
@@ -693,9 +712,11 @@ for trial = 1:n_trials
         trial, initial_reaching_dist, final_reaching_dist);
 end
 
-fprintf('\nLEARNING EFFICIENCY:\n');
+fprintf('LEARNING EFFICIENCY:\n');
 fprintf('─────────────────────────────────────────────────────────\n');
 fprintf('Final Free Energy:           %.6e\n', free_energy_all(end));
 fprintf('Free Energy Reduction Rate:  %.6e per step\n', (free_energy_all(1) - free_energy_all(end)) / N);
 fprintf('Total trials completed:      %d\n', n_trials);
 fprintf('Total learning steps:        %d\n\n', N);
+
+end  % End of hierarchical_motion_inference_3D_EXACT function
