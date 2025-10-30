@@ -362,216 +362,105 @@ end  % End main loop
 fprintf('\n\n');
 
 % ====================================================================
-% 3D VISUALIZATION
+% SAVE NUMERICAL RESULTS (No Graphics - Batch Mode Optimized)
 % ====================================================================
 
-fprintf('Creating visualization...\n');
-
-% Use painters renderer to avoid graphics hardware issues in batch mode
-fig = figure('Position', [100, 100, 1600, 1000], 'Visible', 'off', 'Renderer', 'painters');
-
-% Define colors for trials
-colors = {'r', 'g', 'b', 'm'};
-
-% Plot 1: 3D Ground Truth Trajectories (Actual Reaching Paths)
-subplot(2, 4, 1);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    traj_x = x_true(trial_idx);
-    traj_y = y_true(trial_idx);
-    traj_z = z_true(trial_idx);
-    
-    % Plot trajectory with color gradient (time progression)
-    plot_trajectory_3d(traj_x, traj_y, traj_z, colors{trial}, 0.7);
-    
-    % Plot starting position and target (no legend for batch mode)
-    plot3(trial_start_positions(trial,1), trial_start_positions(trial,2), trial_start_positions(trial,3), ...
-        's', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial});
-    plot3(targets(trial, 1), targets(trial, 2), targets(trial, 3), ...
-        'o', 'Color', colors{trial}, 'MarkerSize', 12, 'MarkerFaceColor', colors{trial});
-end
-axis equal; grid on;
-xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('3D Ground Truth Trajectories (Actual Reaching)');
-view(45, 45);
-
-% Plot 2: 3D Learned Position Predictions (Model Learned Trajectories)
-subplot(2, 4, 2);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    traj_x = R_L1(trial_idx,1);
-    traj_y = R_L1(trial_idx,2);
-    traj_z = R_L1(trial_idx,3);
-    
-    % Plot trajectory with color gradient (time progression) - dashed
-    plot_trajectory_3d_dashed(traj_x, traj_y, traj_z, colors{trial}, 0.7);
-    
-    % Plot starting position
-    plot3(trial_start_positions(trial,1), trial_start_positions(trial,2), trial_start_positions(trial,3), ...
-        's', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k');
-    % Plot target
-    plot3(targets(trial, 1), targets(trial, 2), targets(trial, 3), ...
-        'o', 'Color', colors{trial}, 'MarkerSize', 12, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k');
-end
-axis equal; grid on;
-xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('3D Learned Position Predictions (Model Trajectories)');
-view(45, 45);
-
-% Plot 3: 3D Overlay - Ground Truth vs Learned Predictions
-subplot(2, 4, 3);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    
-    % Ground truth trajectory (solid)
-    traj_x = x_true(trial_idx);
-    traj_y = y_true(trial_idx);
-    traj_z = z_true(trial_idx);
-    plot_trajectory_3d(traj_x, traj_y, traj_z, colors{trial}, 0.7);
-    
-    % Learned prediction trajectory (dashed)
-    traj_x_pred = R_L1(trial_idx,1);
-    traj_y_pred = R_L1(trial_idx,2);
-    traj_z_pred = R_L1(trial_idx,3);
-    plot_trajectory_3d_dashed(traj_x_pred, traj_y_pred, traj_z_pred, colors{trial}, 0.7);
-    
-    % Plot starting position
-    plot3(trial_start_positions(trial,1), trial_start_positions(trial,2), trial_start_positions(trial,3), ...
-        's', 'Color', colors{trial}, 'MarkerSize', 8, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k', 'LineWidth', 1.5);
-    % Plot target
-    plot3(targets(trial, 1), targets(trial, 2), targets(trial, 3), ...
-        'o', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k', 'LineWidth', 1.5);
-end
-axis equal; grid on;
-xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('3D Overlay: Truth (solid) vs Learned (dashed)');
-view(45, 45);
-
-% Plot 4: Alternative 3D View (different angle for better perspective)
-subplot(2, 4, 4);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    
-    % Ground truth trajectory (solid)
-    traj_x = x_true(trial_idx);
-    traj_y = y_true(trial_idx);
-    traj_z = z_true(trial_idx);
-    plot_trajectory_3d(traj_x, traj_y, traj_z, colors{trial}, 0.7);
-    
-    % Learned prediction trajectory (dashed)
-    traj_x_pred = R_L1(trial_idx,1);
-    traj_y_pred = R_L1(trial_idx,2);
-    traj_z_pred = R_L1(trial_idx,3);
-    plot_trajectory_3d_dashed(traj_x_pred, traj_y_pred, traj_z_pred, colors{trial}, 0.7);
-    
-    % Plot starting position
-    plot3(trial_start_positions(trial,1), trial_start_positions(trial,2), trial_start_positions(trial,3), ...
-        's', 'Color', colors{trial}, 'MarkerSize', 8, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k', 'LineWidth', 1.5);
-    % Plot target
-    plot3(targets(trial, 1), targets(trial, 2), targets(trial, 3), ...
-        'o', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial}, 'MarkerEdgeColor', 'k', 'LineWidth', 1.5);
-end
-axis equal; grid on;
-xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('3D Overlay (Top View)');
-view(0, 90);  % Top-down view
-
-% Calculate position and velocity errors
-pos_error = sqrt((x_true - R_L1(:,1)').^2 + (y_true - R_L1(:,2)').^2 + (z_true - R_L1(:,3)').^2);
-vel_error = sqrt((vx_true - R_L1(:,4)').^2 + (vy_true - R_L1(:,5)').^2 + (vz_true - R_L1(:,6)').^2);
-
-% Plot 5: Position Error by Trial
-subplot(2, 4, 5);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    plot(trial_idx, pos_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5);
-end
-grid on; xlabel('Time (steps)'); ylabel('Position Error (m)');
-title('Position RMSE: Truth vs Learned');
-
-% Plot 6: Velocity Error by Trial
-subplot(2, 4, 6);
-hold on;
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    plot(trial_idx, vel_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5);
-end
-grid on; xlabel('Time (steps)'); ylabel('Velocity Error (m/s)');
-title('Velocity RMSE: Truth vs Learned');
-
-% Plot 7: Free Energy Trajectory
-subplot(2, 4, 7);
-plot(free_energy_all, 'k-', 'LineWidth', 1.5);
-grid on; xlabel('Time (steps)'); ylabel('Free Energy');
-title('Free Energy Minimization');
-xlim([0 N]);
-
-% Plot 8: Trial Indicator
-subplot(2, 4, 8);
-trial_vals = zeros(1, N);
-for trial = 1:n_trials
-    trial_vals(phases_indices{trial}) = trial;
-end
-image(reshape(trial_vals, 1, N));
-colorbar; caxis([1 4]);
-xlabel('Time (steps)');
-title('Trial Label');
-set(gca, 'YTickLabel', '');
-
-% Compute summary statistics by trial
-pos_rmse_by_trial = [];
-vel_rmse_by_trial = [];
-reaching_distance_by_trial = [];
-
-for trial = 1:n_trials
-    trial_idx = phases_indices{trial};
-    pos_rmse_by_trial(trial) = sqrt(mean(pos_error(trial_idx).^2));
-    vel_rmse_by_trial(trial) = sqrt(mean(vel_error(trial_idx).^2));
-    reaching_distance_by_trial(trial) = reaching_error_all(trial_idx(end));
-end
-
-sgtitle(sprintf(['3D Multi-Trial Sensorimotor Reaching - Rao & Ballard Predictive Coding\n', ...
-    'Position RMSE by Trial: [%.4f, %.4f, %.4f, %.4f] m | ', ...
-    'Velocity RMSE: [%.4f, %.4f, %.4f, %.4f] m/s'], ...
-    pos_rmse_by_trial(1), pos_rmse_by_trial(2), pos_rmse_by_trial(3), pos_rmse_by_trial(4), ...
-    vel_rmse_by_trial(1), vel_rmse_by_trial(2), vel_rmse_by_trial(3), vel_rmse_by_trial(4)), ...
-    'FontSize', 10, 'FontWeight', 'bold');
-
-% ====================================================================
-% SAVE FIGURE
-% ====================================================================
-
-fprintf('Saving figure to disk...\n');
+fprintf('Saving results...\n');
 
 output_dir = './figures';
 if ~exist(output_dir, 'dir')
     mkdir(output_dir);
 end
 
-% Save as PNG with simple approach
+% Calculate position and velocity errors
+pos_error = sqrt((x_true - R_L1(:,1)').^2 + (y_true - R_L1(:,2)').^2 + (z_true - R_L1(:,3)').^2);
+vel_error = sqrt((vx_true - R_L1(:,4)').^2 + (vy_true - R_L1(:,5)').^2 + (vz_true - R_L1(:,6)').^2);
+
+% Save all trajectory data to MAT file
 try
-    figure_filename = fullfile(output_dir, '3D_reaching_trajectories.png');
+    results_filename = fullfile(output_dir, '3D_reaching_results.mat');
+    save(results_filename, 'x_true', 'y_true', 'z_true', 'vx_true', 'vy_true', 'vz_true', ...
+        'R_L1', 'R_L2', 'R_L3', 'pos_error', 'vel_error', 'free_energy_all', ...
+        'reaching_error_all', 'targets', 'phases_indices', 'trial_start_positions', '-v7.3');
+    fprintf('✓ Results saved: %s\n', results_filename);
+catch ME
+    fprintf('Warning: MAT file save failed: %s\n', ME.message);
+end
+
+% Create simple 2D plots instead of 3D (much faster in batch mode)
+fprintf('Creating 2D summary plots...\n');
+
+fig = figure('Position', [100, 100, 1400, 800], 'Visible', 'off');
+
+colors = {'r', 'g', 'b', 'm'};
+
+% Plot 1: Position Error Over Time
+subplot(2, 3, 1);
+hold on;
+for trial = 1:n_trials
+    trial_idx = phases_indices{trial};
+    plot(trial_idx, pos_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 2, 'DisplayName', sprintf('Trial %d', trial));
+end
+grid on; xlabel('Time (steps)'); ylabel('Position Error (m)');
+title('Position Error: Truth vs Learned');
+legend off;
+
+% Plot 2: Velocity Error Over Time
+subplot(2, 3, 2);
+hold on;
+for trial = 1:n_trials
+    trial_idx = phases_indices{trial};
+    plot(trial_idx, vel_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 2, 'DisplayName', sprintf('Trial %d', trial));
+end
+grid on; xlabel('Time (steps)'); ylabel('Velocity Error (m/s)');
+title('Velocity Error: Truth vs Learned');
+legend off;
+
+% Plot 3: Free Energy Over Time
+subplot(2, 3, 3);
+semilogy(free_energy_all, 'k-', 'LineWidth', 2);
+grid on; xlabel('Time (steps)'); ylabel('Free Energy (log scale)');
+title('Free Energy Minimization');
+xlim([0 N]);
+
+% Plot 4: X Position Over Time
+subplot(2, 3, 4);
+hold on;
+plot(x_true, 'b-', 'LineWidth', 2, 'DisplayName', 'Ground Truth');
+plot(R_L1(:,1), 'r--', 'LineWidth', 1.5, 'DisplayName', 'Learned');
+grid on; xlabel('Time (steps)'); ylabel('X Position (m)');
+title('X Coordinate Prediction');
+legend off;
+
+% Plot 5: Y Position Over Time
+subplot(2, 3, 5);
+hold on;
+plot(y_true, 'b-', 'LineWidth', 2, 'DisplayName', 'Ground Truth');
+plot(R_L1(:,2), 'r--', 'LineWidth', 1.5, 'DisplayName', 'Learned');
+grid on; xlabel('Time (steps)'); ylabel('Y Position (m)');
+title('Y Coordinate Prediction');
+legend off;
+
+% Plot 6: Z Position Over Time
+subplot(2, 3, 6);
+hold on;
+plot(z_true, 'b-', 'LineWidth', 2, 'DisplayName', 'Ground Truth');
+plot(R_L1(:,3), 'r--', 'LineWidth', 1.5, 'DisplayName', 'Learned');
+grid on; xlabel('Time (steps)'); ylabel('Z Position (m)');
+title('Z Coordinate Prediction');
+legend off;
+
+sgtitle('3D Sensorimotor Reaching - Rao & Ballard Predictive Coding', 'FontSize', 12, 'FontWeight', 'bold');
+
+% Save figure
+try
+    figure_filename = fullfile(output_dir, '3D_reaching_summary.png');
     saveas(fig, figure_filename, 'png');
-    fprintf('✓ PNG saved: %s\n', figure_filename);
+    fprintf('✓ Summary plot saved: %s\n', figure_filename);
 catch ME
-    fprintf('Warning: PNG save failed: %s\n', ME.message);
+    fprintf('Warning: Plot save failed: %s\n', ME.message);
 end
 
-% Save as PDF
-try
-    pdf_filename = fullfile(output_dir, '3D_reaching_trajectories.pdf');
-    saveas(fig, pdf_filename, 'pdf');
-    fprintf('✓ PDF saved: %s\n', pdf_filename);
-catch ME
-    fprintf('Warning: PDF save failed: %s\n', ME.message);
-end
-
-% Close figure
 close(fig);
 
 % ====================================================================
