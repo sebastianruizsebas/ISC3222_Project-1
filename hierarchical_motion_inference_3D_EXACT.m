@@ -9,8 +9,6 @@ fprintf('╚══════════════════════�
 % Disable graphics for SSH/batch execution
 set(0, 'DefaultFigureVisible', 'off');
 set(groot, 'defaultFigureCreateFcn', @(fig, ~) set(fig, 'Visible', 'off'));
-set(0, 'DefaultFigureGraphicsToolbar', 'off');
-set(0, 'DefaultFigureDockControls', 'off');
 fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
 
 % ====================================================================
