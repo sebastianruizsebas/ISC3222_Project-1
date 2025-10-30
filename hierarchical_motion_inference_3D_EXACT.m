@@ -4,6 +4,14 @@ fprintf('║  Learning to Reach Targets in 3D Space via Predictive Coding ║\n'
 fprintf('╚═════════════════════════════════════════════════════════════╝\n\n');
 
 % ====================================================================
+% BATCH MODE SETUP
+% ====================================================================
+% Disable graphics for SSH/batch execution
+set(0, 'DefaultFigureVisible', 'off');
+set(groot, 'defaultFigureCreateFcn', @(fig, ~) set(fig, 'Visible', 'off'));
+fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
+
+% ====================================================================
 % 3D REACHING TASK CONFIGURATION
 % ====================================================================
 
@@ -357,7 +365,8 @@ fprintf('\n\n');
 % 3D VISUALIZATION
 % ====================================================================
 
-figure('Position', [100, 100, 1600, 1000]);
+fprintf('Creating visualization...\n');
+fig = figure('Position', [100, 100, 1600, 1000], 'Visible', 'off');
 
 % Define colors for trials
 colors = {'r', 'g', 'b', 'm'};
@@ -539,19 +548,31 @@ sgtitle(sprintf(['3D Multi-Trial Sensorimotor Reaching - Rao & Ballard Predictiv
 % SAVE FIGURE
 % ====================================================================
 
+fprintf('Saving figure...\n');
+
 output_dir = './figures';
 if ~exist(output_dir, 'dir')
     mkdir(output_dir);
 end
 
-figure_filename = fullfile(output_dir, '3D_reaching_trajectories.png');
-saveas(gcf, figure_filename);
-fprintf('\n✓ Figure saved to: %s\n', figure_filename);
+try
+    figure_filename = fullfile(output_dir, '3D_reaching_trajectories.png');
+    print(gcf, figure_filename, '-dpng', '-r150');
+    fprintf('✓ Figure saved to: %s\n', figure_filename);
+catch ME
+    fprintf('Warning: Could not save PNG: %s\n', ME.message);
+end
 
-% Also save as high-resolution PDF
-pdf_filename = fullfile(output_dir, '3D_reaching_trajectories.pdf');
-saveas(gcf, pdf_filename);
-fprintf('✓ Figure saved to: %s\n', pdf_filename);
+try
+    pdf_filename = fullfile(output_dir, '3D_reaching_trajectories.pdf');
+    print(gcf, pdf_filename, '-dpdf', '-r150');
+    fprintf('✓ Figure saved to: %s\n', pdf_filename);
+catch ME
+    fprintf('Warning: Could not save PDF: %s\n', ME.message);
+end
+
+% Close figure to free memory
+close(gcf);
 
 % ====================================================================
 % ANALYSIS SUMMARY (3D Multi-Trial)
