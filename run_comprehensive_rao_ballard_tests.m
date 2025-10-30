@@ -342,6 +342,12 @@ fprintf('═══════════════════════�
 fprintf('TEST SUITE 9: Generating Comprehensive Visualizations\n');
 fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
+% Create figures directory if it doesn't exist
+if ~exist('figures', 'dir')
+    mkdir('figures');
+    fprintf('Created /figures/ directory for output plots.\n');
+end
+
 % Figure 1: Trajectory and Error Evolution
 create_trajectory_figure(t, x_true, y_true, vx_true, vy_true, ax_true, ay_true, ...
                          R_L1, R_L2, R_L3, pos_error_total, vel_error_total, ...
@@ -447,8 +453,8 @@ end
 function create_trajectory_figure(t, x_true, y_true, vx_true, vy_true, ax_true, ay_true, ...
                                    R_L1, R_L2, R_L3, pos_err, vel_err, acc_err, fe)
     
-    figure('Name', '2D Circular Trajectory and Predictions', 'NumberTitle', 'off', ...
-           'Position', [50 50 1400 1000]);
+    fig = figure('Name', '2D Circular Trajectory and Predictions', 'NumberTitle', 'off', ...
+           'Position', [50 50 1400 1000], 'Visible', 'off');
     
     % Trajectory
     subplot(3,3,1);
@@ -513,12 +519,15 @@ function create_trajectory_figure(t, x_true, y_true, vx_true, vy_true, ax_true, 
     semilogy(t, acc_err, 'g-', 'LineWidth', 1.5);
     xlabel('Time (s)'); ylabel('Error (m/s²)'); title('Acceleration Error');
     grid on;
+
+    saveas(fig, 'figures/trajectory_and_predictions.png');
+    close(fig);
 end
 
 function create_error_dynamics_figure(t, E_L1, E_L2, E_L3)
     
-    figure('Name', 'Error Neuron Dynamics', 'NumberTitle', 'off', ...
-           'Position', [50 50 1400 500]);
+    fig = figure('Name', 'Error Neuron Dynamics', 'NumberTitle', 'off', ...
+           'Position', [50 50 1400 500], 'Visible', 'off');
     
     % L1 errors
     subplot(1,3,1);
@@ -546,12 +555,15 @@ function create_error_dynamics_figure(t, E_L1, E_L2, E_L3)
     end
     xlabel('Time (s)'); ylabel('|Error| (log)'); title('Layer 3: Accel Errors');
     grid on;
+
+    saveas(fig, 'figures/error_dynamics.png');
+    close(fig);
 end
 
 function create_weight_matrices_figure(W_L1, W_L2)
     
-    figure('Name', 'Learned Weight Matrices', 'NumberTitle', 'off', ...
-           'Position', [50 50 1000 700]);
+    fig = figure('Name', 'Learned Weight Matrices', 'NumberTitle', 'off', ...
+           'Position', [50 50 1000 700], 'Visible', 'off');
     
     % W_L1
     subplot(2,1,1);
@@ -568,12 +580,15 @@ function create_weight_matrices_figure(W_L1, W_L2)
     xlabel('Acceleration Component'); ylabel('Motion Filter Index');
     title('W^(L2): Motion ← Acceleration');
     set(gca, 'XTickLabel', {'ax', 'ay', 'bias'});
+
+    saveas(fig, 'figures/weight_matrices.png');
+    close(fig);
 end
 
 function create_learning_phases_figure(t, phase_results, phases, phase_names, fe, pos_err, vel_err)
     
-    figure('Name', 'Learning Phase Analysis', 'NumberTitle', 'off', ...
-           'Position', [50 50 1400 800]);
+    fig = figure('Name', 'Learning Phase Analysis', 'NumberTitle', 'off', ...
+           'Position', [50 50 1400 800], 'Visible', 'off');
     
     % Phase coloring
     colors = {'r', 'g', 'b', 'm'};
@@ -631,4 +646,7 @@ function create_learning_phases_figure(t, phase_results, phases, phase_names, fe
     set(gca, 'XTickLabel', phase_names);
     ylabel('Mean Velocity Error (m/s)'); title('Velocity Error by Phase');
     grid on;
+
+    saveas(fig, 'figures/learning_phases.png');
+    close(fig);
 end

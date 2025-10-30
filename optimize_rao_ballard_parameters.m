@@ -40,8 +40,8 @@ num_trials = 50;  % Number of random parameter sets to test
 param_space = struct();
 param_space.eta_rep     = struct('log_min', -3, 'log_max', 0);   % Search 10^-3 to 10^0 (0.001 to 1.0)
 param_space.eta_W       = struct('log_min', -4, 'log_max', -1);  % Search 10^-4 to 10^-1 (0.0001 to 0.1)
-param_space.momentum    = struct('min', 0.85, 'max', 0.99);     % Search 0.85 to 0.99
-param_space.weight_decay = struct('min', 0.999, 'max', 1.0);    % Search 0.999 to 1.0 (no decay)
+param_space.momentum    = struct('min', 0.52, 'max', 0.99);     % Search 0.52 to 0.99
+param_space.weight_decay = struct('min', 0.900, 'max', 1.0);    % Search 0.900 to 1.0 (no decay)
 
 % Define weights for the objective function.
 % Higher weights prioritize minimizing errors in higher-order derivatives.
@@ -165,6 +165,11 @@ else
     fprintf('  - eta_W:          %.6f\n', best_params.eta_W);
     fprintf('  - momentum:       %.6f\n', best_params.momentum);
     fprintf('  - weight_decay:   %.6f\n\n', best_params.weight_decay);
+    
+    % --- MODIFIED: Save results to a file ---
+    results_filename = sprintf('optimization_results_%s.mat', datestr(now,'yyyy-mm-dd_HH-MM-SS'));
+    fprintf('Saving optimization results to %s\n', results_filename);
+    save(results_filename, 'best_params', 'results');
     
     fprintf('You can now use these parameters in the main script for optimal performance.\n');
     
