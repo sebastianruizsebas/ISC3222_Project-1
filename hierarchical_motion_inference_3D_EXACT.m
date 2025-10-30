@@ -295,13 +295,19 @@ for i = 1:N-1
                 target_pos = targets(trial, :);
                 reach_direction = (target_pos - start_pos) / (norm(target_pos - start_pos) + 1e-6);
                 target_distance = norm(target_pos - start_pos);
-                reaching_speed = 0.2 * target_distance;  % Scale with distance (0.2 = fraction of distance per second)
+                reaching_speed = 0.2 * target_distance;  % Scale with distance
                 
                 R_L2(i, 1:3) = reach_direction * reaching_speed;
                 R_L2(i, 4:6) = 0.01 * randn(1, 3);
                 
+                % PARTIALLY RESET WEIGHTS to break out of Trial 1 convergence
+                % Keep structure but reduce magnitudes learned in previous trial
+                W_L2_from_L3 = 0.5 * W_L2_from_L3;  % Decay learned weights
+                W_L1_from_L2(1:3, 1:3) = 0.01 * eye(3, 3);  % Reset position-motor coupling
+                W_L1_from_L2(4:6, 1:3) = 0.5 * W_L1_from_L2(4:6, 1:3);  % Decay velocity coupling
+                
                 current_trial = trial;
-                fprintf('\n[Trial %d started at step %d - L3 reset to target, L2 reinitialized]\n', trial, i);
+                fprintf('\n[Trial %d started at step %d - L3/L2 reset, weights partially decayed]\n', trial, i);
                 break;
             end
         end
