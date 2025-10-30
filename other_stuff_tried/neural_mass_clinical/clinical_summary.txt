@@ -1,0 +1,12 @@
+Neural Mass Model - Clinical Condition Parameters
+Generated: 30-Oct-2025 05:09:43
+
+Condition | Name | Peak Amp (mV) | Latency (ms) | Key Finding
+----------|------|---------------|--------------|-------------
+1 | Healthy Control | 0.1111 | 38.0 | Normal baseline
+2 | Schizophrenia | 0.0832 | 50.0 | Reduced connectivity, gating deficit
+3 | Autism Spectrum Disorder | 0.1772 | 29.0 | Enhanced local, reduced global
+4 | ADHD | 0.1818 | 1.0 | Impaired inhibition
+5 | Depression | 0.0791 | 41.0 | Blunted feedback
+6 | Anxiety Disorder | 0.2048 | 30.0 | Enhanced threat detection
+7 | Dyslexia | 0.1233 | 42.0 | Temporal processing deficit

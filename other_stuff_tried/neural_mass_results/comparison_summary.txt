@@ -1,0 +1,9 @@
+Neural Mass Model - Human Data Parameter Sets
+Generated: 30-Oct-2025 04:31:48
+
+Scenario | Name | Peak Amplitude (mV) | Peak Latency (ms) | Reference
+---------|------|---------------------|------------------|----------
+1 | Baseline (Resting State) | 0.0300 | 597.0 | Baseline neurophysiology
+2 | Visual Evoked Response (VEP) | 0.0800 | 473.0 | Moran et al. (2009) - Typical VEP latencies
+3 | Auditory Oddball (P300) | 0.1100 | 532.0 | Garrido et al. (2007) - P300 dynamics
+4 | Prediction Error (Mismatch Negativity) | 0.1818 | 1.0 | Kiebel et al. (2009) - Predictive coding
