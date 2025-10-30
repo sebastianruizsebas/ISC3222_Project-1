@@ -1,0 +1,164 @@
+[Warning: Name is nonexistent or not a directory: C:\Users\srseb\OneDrive\School\FSU\Fall 2025\Symbolic Numeric Computation w Alan Lemmon\Project1\activeinferencetutorial] 
+╔═════════════════════════════════════════════════════════════╗
+║  SENSORIMOTOR LEARNING: 3D REACHING & GRASPING             ║
+║  Learning to Reach Targets in 3D Space via Predictive Coding ║
+╚═════════════════════════════════════════════════════════════╝
+
+Batch mode: Graphics output disabled, figures will be saved to disk.
+
+3D REACHING TASK (Multi-Trial):
+Workspace bounds: X∈[-2.00,2.00], Y∈[-2.00,2.00], Z∈[-1.00,2.00]
+
+Trial 1 (0.00-39.99s): Start [-0.50, 1.80, 1.20] → Target [1.50, 1.50, 1.00]
+Trial 2 (40.00-79.99s): Start [0.39, -1.38, -0.53] → Target [-1.50, 1.50, 0.50]
+Trial 3 (80.00-119.99s): Start [-1.77, 1.46, 0.80] → Target [-1.50, -1.50, 1.50]
+Trial 4 (120.00-159.99s): Start [0.83, -1.92, 1.91] → Target [1.50, -1.50, -0.50]
+
+3D REACHING TASK:
+  Phase 1 (0-40.00s):  Reach to target [1.50, 1.50, 1.00]
+  Phase 2 (40.00-80.00s):  Reach to target [-1.50, 1.50, 0.50]
+  Phase 3 (80.00-120.00s):  Reach to target [-1.50, -1.50, 1.50]
+  Phase 4 (120.00-160.00s): Reach to target [1.50, -1.50, -0.50]
+
+NETWORK ARCHITECTURE (3D SENSORIMOTOR):
+  Level 1 (Proprioception): 7 neurons [x, y, z, vx, vy, vz, bias]
+    → Inferred from arm position and velocity in 3D
+  Level 2 (Motor Basis):    6 neurons [learned motor primitives]
+    → Learned combinations of 3D velocity commands
+  Level 3 (Goal):           4 neurons [target_x, target_y, target_z, bias]
+
+    → Represents desired 3D location (provided by task)
+
+3D MOTOR DYNAMICS:
+  Motor gain: 0.50 (scaling of commands to actual motion)
+  Damping: 0.95 (velocity decay per timestep)
+  Workspace: x,y,z ∈ [-2.00, 2.00] meters
+
+LEARNING PARAMETERS:
+  η_rep = 0.005000 (representation learning rate)
+  η_W   = 0.000500 (weight matrix learning rate)
+  Momentum = 0.9000
+  Weight Decay = 0.9800
+  π_L1  = 100, π_L2  = 10, π_L3  = 1
+
+HIERARCHICAL PREDICTIVE CODING WITH ACTIVE INFERENCE:
+─────────────────────────────────────────────────────────────
+L3 (Goal): ACTIVE INFERENCE NODE
+  • NOT clamped to task target (varies over time)
+  • Infers goal from proprioceptive errors (bottom-up)
+  • Pulled toward task target by soft constraint (top-down)
+  • Creates continuous prediction errors for learning
+  • Enables generalization across phase transitions
+
+L2 (Motor Basis): Learned motor primitives
+  • Learns to predict motor commands from goal
+  • Updated via proprioceptive coupling errors
+
+L1 (Proprioception): Sensory prediction layer
+  • Predicts position and velocity from motor commands
+  • Compared against actual sensory input
+  • Generates error signals that drive learning
+  η_W   = 0.000500 (weight matrix learning rate)
+  Momentum = 0.9000
+  Weight Decay = 0.9800
+  π_L1  = 100, π_L2  = 10, π_L3  = 1
+
+INITIAL CONDITIONS (Trial 1):
+  Start position: [-0.50, 1.80, 1.20]
+  Target position: [1.50, 1.50, 1.00]
+  R_L2(1,:) = reaching velocity [0.4004, -0.0606, -0.0392] m/s (toward target)
+  R_L3(1,:) = [target_x=1.50, target_y=1.50, target_z=1.00, bias=1]
+
+WEIGHT MATRICES INITIALIZED (Bootstrapped):
+  W_L2_from_L3: Goal → Motor (target position → velocity commands)
+    - Direct coupling: target_xyz → motor velocity (gain=0.1)
+    - Auxiliary channels: random small values
+  W_L1_from_L2: Motor → Proprioception
+    - Direct coupling: motor velocity → predicted velocity (gain=1.0)
+    - Position predictions: weak coupling (gain=0.01)
+
+Running 3D sensorimotor reaching trials...
+Total iterations: 16000 (dt=0.0100s per step, ~160.0 seconds estimated)
+........................................
+[Trial 2 started at step 4001 - WEIGHT DECAY]
+  W_L2_from_L3: ||W|| 1.639001 → 0.819501 (decay: 50.0%)
+  W_L1_from_L2: ||W|| 1.095747 → 0.767023 (decay: 30.0%)
+  W_L1_from_L2 velocity rows (4-6): ||W_vel|| = 0.686000
+  L2 reinitialized: R_L2(i,1:3) = [-0.3789, 0.5752, 0.2064] (reaching speed 0.7190 m/s)
+      Step 4001 (+0): motor=[-0.379,0.575,0.206], W_L1[4:6]norm=0.686000, test_vel=[-0.2599,0.3946,0.1416], actual_pred_vel=[-0.2599,0.3946,0.1416]
+      Step 4002 (+1): motor=[-0.341,0.518,0.186], W_L1[4:6]norm=0.980000, test_vel=[-0.3340,0.5073,0.1821], actual_pred_vel=[-0.3340,0.5073,0.1821]
+      Step 4003 (+2): motor=[-0.307,0.465,0.167], W_L1[4:6]norm=0.980000, test_vel=[-0.3006,0.4562,0.1637], actual_pred_vel=[-0.3006,0.4562,0.1637]
+      Step 4004 (+3): motor=[-0.276,0.419,0.150], W_L1[4:6]norm=0.980000, test_vel=[-0.2705,0.4101,0.1470], actual_pred_vel=[-0.2705,0.4101,0.1470]
+      Step 4005 (+4): motor=[-0.248,0.376,0.135], W_L1[4:6]norm=0.980000, test_vel=[-0.2434,0.3686,0.1321], actual_pred_vel=[-0.2434,0.3686,0.1321]
+........................................
+[Trial 3 started at step 8001 - WEIGHT DECAY]
+  W_L2_from_L3: ||W|| 1.962643 → 0.981322 (decay: 50.0%)
+  W_L1_from_L2: ||W|| 1.116826 → 0.781779 (decay: 30.0%)
+  W_L1_from_L2 velocity rows (4-6): ||W_vel|| = 0.686000
+  L2 reinitialized: R_L2(i,1:3) = [0.0535, -0.5929, 0.1393] (reaching speed 0.6114 m/s)
+      Step 8001 (+0): motor=[0.054,-0.593,0.139], W_L1[4:6]norm=0.686000, test_vel=[0.0367,-0.4068,0.0956], actual_pred_vel=[0.0367,-0.4068,0.0956]
+      Step 8002 (+1): motor=[0.048,-0.534,0.125], W_L1[4:6]norm=0.980001, test_vel=[0.0471,-0.5230,0.1227], actual_pred_vel=[0.0471,-0.5230,0.1227]
+      Step 8003 (+2): motor=[0.043,-0.480,0.112], W_L1[4:6]norm=0.980002, test_vel=[0.0421,-0.4708,0.1099], actual_pred_vel=[0.0421,-0.4708,0.1099]
+      Step 8004 (+3): motor=[0.038,-0.432,0.100], W_L1[4:6]norm=0.980000, test_vel=[0.0377,-0.4236,0.0984], actual_pred_vel=[0.0377,-0.4236,0.0984]
+      Step 8005 (+4): motor=[0.034,-0.389,0.090], W_L1[4:6]norm=0.980005, test_vel=[0.0336,-0.3809,0.0880], actual_pred_vel=[0.0336,-0.3809,0.0880]
+........................................
+[Trial 4 started at step 12001 - WEIGHT DECAY]
+  W_L2_from_L3: ||W|| 1.886654 → 0.943327 (decay: 50.0%)
+  W_L1_from_L2: ||W|| 1.110386 → 0.777270 (decay: 30.0%)
+  W_L1_from_L2 velocity rows (4-6): ||W_vel|| = 0.686000
+  L2 reinitialized: R_L2(i,1:3) = [0.1335, 0.0835, -0.4819] (reaching speed 0.5070 m/s)
+      Step 12001 (+0): motor=[0.134,0.084,-0.482], W_L1[4:6]norm=0.686000, test_vel=[0.0916,0.0573,-0.3306], actual_pred_vel=[0.0916,0.0573,-0.3306]
+      Step 12002 (+1): motor=[0.120,0.075,-0.434], W_L1[4:6]norm=0.980001, test_vel=[0.1177,0.0736,-0.4251], actual_pred_vel=[0.1177,0.0736,-0.4251]
+      Step 12003 (+2): motor=[0.108,0.068,-0.390], W_L1[4:6]norm=0.980002, test_vel=[0.1060,0.0664,-0.3819], actual_pred_vel=[0.1060,0.0664,-0.3819]
+      Step 12004 (+3): motor=[0.097,0.061,-0.350], W_L1[4:6]norm=0.980000, test_vel=[0.0954,0.0599,-0.3429], actual_pred_vel=[0.0954,0.0599,-0.3429]
+      Step 12005 (+4): motor=[0.088,0.055,-0.314], W_L1[4:6]norm=0.980004, test_vel=[0.0858,0.0541,-0.3076], actual_pred_vel=[0.0858,0.0541,-0.3076]
+........................................
+✓ Main loop complete (16000 iterations executed)
+
+Saving results...
+✓ Results saved: .\figures\3D_reaching_results.mat
+Creating 2D summary plots...
+✓ Summary plot saved: .\figures\3D_reaching_summary.png
+
+╔═══════════════════════════════════════════════════════════════╗
+║  3D MULTI-TRIAL REACHING - GROUND TRUTH vs LEARNED        ║
+╚═══════════════════════════════════════════════════════════════╝
+
+POSITION PREDICTIONS (from R_L1(:,1:3)) vs Ground Truth:
+─────────────────────────────────────────────────────────
+Overall Position RMSE: 1.682214 m
+
+By Trial:
+  Trial 1: Start [-0.50, 1.80, 1.20] → Target [1.50, 1.50, 1.00]
+    Position RMSE = 1.302274 m (mean error: 1.241859 m)
+  Trial 2: Start [0.39, -1.38, -0.53] → Target [-1.50, 1.50, 0.50]
+    Position RMSE = 1.170018 m (mean error: 1.135036 m)
+  Trial 3: Start [-1.77, 1.46, 0.80] → Target [-1.50, -1.50, 1.50]
+    Position RMSE = 2.323473 m (mean error: 2.194486 m)
+  Trial 4: Start [0.83, -1.92, 1.91] → Target [1.50, -1.50, -0.50]
+    Position RMSE = 1.689717 m (mean error: 1.580745 m)
+
+VELOCITY PREDICTIONS (from R_L1(:,4:6)) vs Ground Truth:
+─────────────────────────────────────────────────────────
+Overall Velocity RMSE: 0.152133 m/s
+
+By Trial:
+  Trial 1: Velocity RMSE = 0.130179 m/s (mean error: 0.090771 m/s)
+  Trial 2: Velocity RMSE = 0.172650 m/s (mean error: 0.102723 m/s)
+  Trial 3: Velocity RMSE = 0.157535 m/s (mean error: 0.101331 m/s)
+  Trial 4: Velocity RMSE = 0.144951 m/s (mean error: 0.098408 m/s)
+
+FINAL REACHING DISTANCE TO TARGET:
+─────────────────────────────────────────────────────────
+  Trial 1: Initial distance = 2.032055 m, Final distance = 1.135710 m
+  Trial 2: Initial distance = 3.592759 m, Final distance = 3.820552 m
+  Trial 3: Initial distance = 3.055099 m, Final distance = 2.553883 m
+  Trial 4: Initial distance = 2.533428 m, Final distance = 3.151199 m
+
+LEARNING EFFICIENCY:
+─────────────────────────────────────────────────────────
+Final Free Energy:           0.000000e+00
+Free Energy Reduction Rate:  2.605352e-04 per step
+Total trials completed:      4
+Total learning steps:        16001
+

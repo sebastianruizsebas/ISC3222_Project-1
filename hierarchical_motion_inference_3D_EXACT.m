@@ -260,6 +260,7 @@ learning_trace_W = zeros(1, N);  % Track weight learning magnitude
 % ====================================================================
 
 fprintf('Running 3D sensorimotor reaching trials...\n');
+fprintf('Total iterations: %d (dt=%.4fs per step, ~%.1f seconds estimated)\n', N-1, dt, (N-1)*dt);
 
 current_trial = 1;
 
@@ -302,12 +303,32 @@ for i = 1:N-1
                 
                 % PARTIALLY RESET WEIGHTS to break out of Trial 1 convergence
                 % Keep structure but reduce magnitudes learned in previous trial
-                W_L2_from_L3 = 0.5 * W_L2_from_L3;  % Decay learned weights
-                W_L1_from_L2(1:3, 1:3) = 0.01 * eye(3, 3);  % Reset position-motor coupling
-                W_L1_from_L2(4:6, 1:3) = 0.5 * W_L1_from_L2(4:6, 1:3);  % Decay velocity coupling
+                W_L2_from_L3_old = W_L2_from_L3;
+                W_L1_from_L2_old = W_L1_from_L2;
+                
+                W_L2_from_L3 = 0.5 * W_L2_from_L3;  % Decay learned weights by 50%
+                W_L1_from_L2 = 0.7 * W_L1_from_L2;  % Decay velocity coupling
+                
+                % CRITICAL: Reset motor→velocity rows to identity at phase boundary
+                % Prevent these from being zeroed out during learning
+                W_L1_from_L2(4:6, 1:3) = eye(3, 3);  % Reset motor→velocity mapping
                 
                 current_trial = trial;
-                fprintf('\n[Trial %d started at step %d - L3/L2 reset, weights partially decayed]\n', trial, i);
+                W_L23_norm_before = norm(W_L2_from_L3_old);
+                W_L23_norm_after = norm(W_L2_from_L3);
+                W_L12_norm_before = norm(W_L1_from_L2_old);
+                W_L12_norm_after = norm(W_L1_from_L2);
+                
+                % Diagnose W_L1_from_L2 structure
+                vel_coupling_rows = W_L1_from_L2(4:6, :);  % Rows 4-6 predict velocity
+                vel_coupling_norm = norm(vel_coupling_rows);
+                
+                fprintf('\n[Trial %d started at step %d - WEIGHT DECAY]\n', trial, i);
+                fprintf('  W_L2_from_L3: ||W|| %.6f → %.6f (decay: %.1f%%)\n', W_L23_norm_before, W_L23_norm_after, 50);
+                fprintf('  W_L1_from_L2: ||W|| %.6f → %.6f (decay: %.1f%%)\n', W_L12_norm_before, W_L12_norm_after, 30);
+                fprintf('  W_L1_from_L2 velocity rows (4-6): ||W_vel|| = %.6f (RESET to identity)\n', vel_coupling_norm);
+                fprintf('  L2 reinitialized: R_L2(i,1:3) = [%.4f, %.4f, %.4f] (reaching speed %.4f m/s)\n', ...
+                    R_L2(i,1), R_L2(i,2), R_L2(i,3), reaching_speed);
                 break;
             end
         end
@@ -341,6 +362,21 @@ for i = 1:N-1
     pred_vx = pred_L1(i, 4);
     pred_vy = pred_L1(i, 5);
     pred_vz = pred_L1(i, 6);
+    
+    % DEBUG: Show motor commands at start of Trials 2-4
+    % Show for first 5 steps after each phase transition
+    % (COMMENTED OUT - verification only)
+    % if current_trial > 1 && i >= phases_indices{current_trial}(1) && i <= phases_indices{current_trial}(1) + 4
+    %     steps_into_phase = i - phases_indices{current_trial}(1);
+    %     % Test computation: what should velocity be from motor_basis?
+    %     test_vel = motor_basis * W_L1_from_L2(4:6, :)';  % Extract velocity rows only
+    %     fprintf('      Step %d (+%d): motor=[%.3f,%.3f,%.3f], W_L1[4:6]norm=%.6f, test_vel=[%.4f,%.4f,%.4f], actual_pred_vel=[%.4f,%.4f,%.4f]\n', ...
+    %         i, steps_into_phase, ...
+    %         motor_basis(1), motor_basis(2), motor_basis(3), ...
+    %         norm(W_L1_from_L2(4:6, :)), ...
+    %         test_vel(1), test_vel(2), test_vel(3), ...
+    %         pred_vx, pred_vy, pred_vz);
+    % end
     
     % ==============================================================
     % STEP 2: KINEMATICS - MOTOR COMMAND EXECUTION
@@ -486,7 +522,7 @@ for i = 1:N-1
     
 end  % End main loop
 
-fprintf('\n\n');
+fprintf('\n✓ Main loop complete (%d iterations executed)\n\n', N-1);
 
 % ====================================================================
 % SAVE NUMERICAL RESULTS (No Graphics - Batch Mode Optimized)
