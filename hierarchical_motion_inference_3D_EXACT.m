@@ -593,12 +593,11 @@ for i = 1:N-1
     dW_L2 = -(eta_W * pi_L2 / layer_scale_L2) * (E_L2(i,:)' * R_L3(i,:));
     W_L2_from_L3 = W_L2_from_L3 + dW_L2;
     
-    % GENTLE regularization: Apply very light decay per-step (0.9995)
-    % This prevents weight explosion without killing learning
-    % Stronger decay happens at phase boundaries (decay_L2_goal, decay_L1_motor)
-    W_L1_from_L2 = W_L1_from_L2 * 0.9995;
-    W_L2_from_L3 = W_L2_from_L3 * 0.9995;
-    
+    % GENTLE per-step weight regularization (prevents unbounded growth)
+    % Much lighter than before (0.99995 instead of 0.98) so learning can still occur
+    W_L1_from_L2 = W_L1_from_L2 * 0.99995;
+    W_L2_from_L3 = W_L2_from_L3 * 0.99995;
+
     learning_trace_W(i) = norm(dW_L1, 'fro') + norm(dW_L2, 'fro');
     
     % ====================================================================
@@ -621,7 +620,7 @@ for i = 1:N-1
     end
     
     % ====================================================================
-    % COMPUTE DYNAMIC PRECISIONS - Responsive Version
+    % COMPUTE DYNAMIC PRECISIONS - Responsive VERSION
     % ====================================================================
     % Precision responds immediately to current error, with memory of history
     
@@ -664,25 +663,37 @@ for i = 1:N-1
     
     % DEBUG: Print dynamic precisions every 1000 steps
     if mod(i, 1000) == 0 && i > 1000
-        L1_avg_err = mean(L1_error_history);
-        L2_avg_err = mean(L2_error_history);
-        L3_avg_err = mean(L3_error_history);
-        L1_var_err = var(L1_error_history);
-        L2_var_err = var(L2_error_history);
-        L3_var_err = var(L3_error_history);
-        
-        % Check actual error magnitudes (not just history stats)
+        % Current errors (THIS TIMESTEP ONLY)
         L1_current = sqrt(sum(E_L1(i,:).^2));
         L2_current = sqrt(sum(E_L2(i,:).^2));
+        L3_current = sqrt(sum(E_L3_from_motor.^2));
         
-        % Diagnostic: Check that weights aren't decaying to zero
+        % History stats (last 100 steps)
+        if length(L1_error_history) > 0
+            L1_avg_err = mean(L1_error_history);
+            L1_var_err = var(L1_error_history);
+        else
+            L1_avg_err = 0;
+            L1_var_err = 0;
+        end
+        
+        if length(L2_error_history) > 0
+            L2_avg_err = mean(L2_error_history);
+            L2_var_err = var(L2_error_history);
+        else
+            L2_avg_err = 0;
+            L2_var_err = 0;
+        end
+        
+        % Check that weights are changing
         W1_norm = norm(W_L1_from_L2, 'fro');
         W2_norm = norm(W_L2_from_L3, 'fro');
         coupling_test = E_L1(i,:) * W_L1_from_L2;
         coupling_norm = norm(coupling_test);
         
-        fprintf('  Step %d: π=[%.2f,%.2f,%.2f] | Errors: L1=%.4f L2=%.4f L3=%.4f | W_norms: W1=%.4f W2=%.4f | coupling=%.4f\n', ...
-            i, pi_L1, pi_L2, pi_L3, L1_current, L2_current, L3_avg_err, W1_norm, W2_norm, coupling_norm);
+        % Show CURRENT errors and HISTORICAL trends
+        fprintf('  Step %d: π=[%.2f,%.2f,%.2f] | Current Err: L1=%.4f L2=%.4f L3=%.4f | Hist Avg: L1=%.4f L2=%.4f | W_norms: W1=%.4f W2=%.4f\n', ...
+            i, pi_L1, pi_L2, pi_L3, L1_current, L2_current, L3_current, L1_avg_err, L2_avg_err, W1_norm, W2_norm);
     end
 end  % End main loop
 

@@ -286,29 +286,43 @@ for iteration = 1:num_iterations
             % Turn off graphics
             old_visible = get(0, 'DefaultFigureVisible');
             set(0, 'DefaultFigureVisible', 'off');
-            
-            % Run the 3D model with parameters and NO plotting (for speed)
-            % Call signature: hierarchical_motion_inference_3D_EXACT(params, make_plots)
-            hierarchical_motion_inference_3D_EXACT(current_params, false);
-            
+
+            % Run the dual-hierarchy model with parameters and NO plotting (for speed)
+            % Call signature: hierarchical_motion_inference_dual_hierarchy(params, make_plots)
+            % Map PSO parameter names to the dual-hierarchy expected names
+            dh_params = struct();
+            dh_params.eta_rep = current_params.eta_rep;
+            dh_params.eta_W = current_params.eta_W;
+            dh_params.momentum = current_params.momentum;
+            % PSO uses decay_L2_goal / decay_L1_motor -> map to planning/motor decay
+            dh_params.decay_plan = current_params.decay_L2_goal;
+            dh_params.decay_motor = current_params.decay_L1_motor;
+            dh_params.motor_gain = current_params.motor_gain;
+            dh_params.damping = current_params.damping;
+            dh_params.reaching_speed_scale = current_params.reaching_speed_scale;
+            dh_params.W_plan_gain = current_params.W_L2_goal_gain;
+            dh_params.W_motor_gain = current_params.W_L1_pos_gain;
+
+            hierarchical_motion_inference_dual_hierarchy(dh_params, false);
+
             % Restore visibility
             set(0, 'DefaultFigureVisible', old_visible);
-            
-            % Load results from the saved MAT file
-            results_file = './figures/3D_reaching_results.mat';
+
+            % Load results from the dual-hierarchy results MAT file
+            results_file = './figures/3D_dual_hierarchy_results.mat';
             if ~isfile(results_file)
                 error('Expected results file not found: %s', results_file);
             end
             loaded_data = load(results_file);
-            
-            % Extract variables from loaded data
-            x_true = loaded_data.x_true;
-            y_true = loaded_data.y_true;
-            z_true = loaded_data.z_true;
-            R_L1 = loaded_data.R_L1;
-            reaching_error_all = loaded_data.reaching_error_all;
-            phases_indices = loaded_data.phases_indices;
-            
+
+            % Extract variables from loaded data (dual-hierarchy naming)
+            if isfield(loaded_data, 'interception_error_all') && isfield(loaded_data, 'phases_indices')
+                interception_error_all = loaded_data.interception_error_all;
+                phases_indices = loaded_data.phases_indices;
+            else
+                error('Results file missing expected variables (interception_error_all, phases_indices)');
+            end
+
         catch ME
             fprintf('    ✗ Simulation failed: %s\n', ME.message);
             set(0, 'DefaultFigureVisible', old_visible);
