@@ -619,33 +619,49 @@ for i = 1:N-1
     end
     
     % ====================================================================
-    % COMPUTE DYNAMIC PRECISIONS
+    % COMPUTE DYNAMIC PRECISIONS (UPDATED - Now Truly Dynamic)
     % ====================================================================
-    % Precision is inverse of variance: π = 1 / (σ² + epsilon)
-    % High error → low precision (less confident)
-    % Low error → high precision (more confident)
+    % Precision represents confidence in predictions
+    % Higher error magnitude → Lower precision (less confident)
+    % Lower error magnitude → Higher precision (more confident)
+    % 
+    % Key insight: Precision should respond to CURRENT error magnitude,
+    % not just variance. This ensures precision adapts immediately when
+    % learning conditions change (e.g., phase transitions).
     
-    epsilon = 0.01;  % Prevent division by zero
+    epsilon = 0.001;  % Small epsilon to prevent division by zero
     
+    % Use mean absolute error as primary signal (more responsive than variance)
     if length(L1_error_history) > 10
+        L1_mean_error = mean(L1_error_history);
         L1_error_var = var(L1_error_history);
-        pi_L1 = pi_L1_base / (1 + L1_error_var / epsilon);  % Decreases with error
+        
+        % Dynamic precision formula: responds to both mean error AND variance
+        % When error is large OR inconsistent → low precision
+        % When error is small AND consistent → high precision
+        pi_L1 = pi_L1_base / (1 + L1_mean_error + L1_error_var / epsilon);
         pi_L1 = max(1, min(1000, pi_L1));  % Keep in reasonable bounds
     else
         pi_L1 = pi_L1_base;
     end
     
     if length(L2_error_history) > 10
+        L2_mean_error = mean(L2_error_history);
         L2_error_var = var(L2_error_history);
-        pi_L2 = pi_L2_base / (1 + L2_error_var / epsilon);
+        
+        % When L2 errors are near-zero, precision stays high (confident)
+        % When L2 errors grow, precision decreases (less confident, try harder)
+        pi_L2 = pi_L2_base / (1 + L2_mean_error + L2_error_var / epsilon);
         pi_L2 = max(0.1, min(100, pi_L2));
     else
         pi_L2 = pi_L2_base;
     end
     
     if length(L3_error_history) > 10
+        L3_mean_error = mean(L3_error_history);
         L3_error_var = var(L3_error_history);
-        pi_L3 = pi_L3_base / (1 + L3_error_var / epsilon);
+        
+        pi_L3 = pi_L3_base / (1 + L3_mean_error + L3_error_var / epsilon);
         pi_L3 = max(0.01, min(10, pi_L3));
     else
         pi_L3 = pi_L3_base;
@@ -653,8 +669,19 @@ for i = 1:N-1
     
     % DEBUG: Print dynamic precisions every 1000 steps
     if mod(i, 1000) == 0 && i > 1000
-        fprintf('  Step %d: π_L1=%.2f, π_L2=%.2f, π_L3=%.2f | Errors: L1=%.4f, L2=%.4f, L3=%.4f\n', ...
-            i, pi_L1, pi_L2, pi_L3, mean(L1_error_history), mean(L2_error_history), mean(L3_error_history));
+        L1_avg_err = mean(L1_error_history);
+        L2_avg_err = mean(L2_error_history);
+        L3_avg_err = mean(L3_error_history);
+        L1_var_err = var(L1_error_history);
+        L2_var_err = var(L2_error_history);
+        L3_var_err = var(L3_error_history);
+        
+        % Check actual error magnitudes (not just history stats)
+        L1_current = sqrt(sum(E_L1(i,:).^2));
+        L2_current = sqrt(sum(E_L2(i,:).^2));
+        
+        fprintf('  Step %d: π=[%.2f,%.2f,%.2f] | Mean Err: L1=%.4f L2=%.4f L3=%.4f | Var: L1=%.6f L2=%.6f L3=%.6f | Current: L1=%.4f L2=%.4f\n', ...
+            i, pi_L1, pi_L2, pi_L3, L1_avg_err, L2_avg_err, L3_avg_err, L1_var_err, L2_var_err, L3_var_err, L1_current, L2_current);
     end
 end  % End main loop
 
