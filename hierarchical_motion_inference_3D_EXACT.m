@@ -9,6 +9,8 @@ fprintf('╚══════════════════════�
 % Disable graphics for SSH/batch execution
 set(0, 'DefaultFigureVisible', 'off');
 set(groot, 'defaultFigureCreateFcn', @(fig, ~) set(fig, 'Visible', 'off'));
+set(0, 'DefaultFigureGraphicsToolbar', 'off');
+set(0, 'DefaultFigureDockControls', 'off');
 fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
 
 % ====================================================================
@@ -366,7 +368,9 @@ fprintf('\n\n');
 % ====================================================================
 
 fprintf('Creating visualization...\n');
-fig = figure('Position', [100, 100, 1600, 1000], 'Visible', 'off');
+
+% Use painters renderer to avoid graphics hardware issues in batch mode
+fig = figure('Position', [100, 100, 1600, 1000], 'Visible', 'off', 'Renderer', 'painters');
 
 % Define colors for trials
 colors = {'r', 'g', 'b', 'm'};
@@ -383,18 +387,16 @@ for trial = 1:n_trials
     % Plot trajectory with color gradient (time progression)
     plot_trajectory_3d(traj_x, traj_y, traj_z, colors{trial}, 0.7);
     
-    % Plot starting position
+    % Plot starting position and target (no legend for batch mode)
     plot3(trial_start_positions(trial,1), trial_start_positions(trial,2), trial_start_positions(trial,3), ...
-        's', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial}, 'DisplayName', sprintf('Trial %d Start', trial));
-    % Plot target
+        's', 'Color', colors{trial}, 'MarkerSize', 10, 'MarkerFaceColor', colors{trial});
     plot3(targets(trial, 1), targets(trial, 2), targets(trial, 3), ...
-        'o', 'Color', colors{trial}, 'MarkerSize', 12, 'MarkerFaceColor', colors{trial}, 'DisplayName', sprintf('Trial %d Target', trial));
+        'o', 'Color', colors{trial}, 'MarkerSize', 12, 'MarkerFaceColor', colors{trial});
 end
 axis equal; grid on;
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
 title('3D Ground Truth Trajectories (Actual Reaching)');
 view(45, 45);
-legend('Location', 'best', 'FontSize', 8);
 
 % Plot 2: 3D Learned Position Predictions (Model Learned Trajectories)
 subplot(2, 4, 2);
@@ -489,22 +491,20 @@ subplot(2, 4, 5);
 hold on;
 for trial = 1:n_trials
     trial_idx = phases_indices{trial};
-    plot(trial_idx, pos_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5, 'DisplayName', sprintf('Trial %d', trial));
+    plot(trial_idx, pos_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5);
 end
 grid on; xlabel('Time (steps)'); ylabel('Position Error (m)');
 title('Position RMSE: Truth vs Learned');
-legend('Location', 'best', 'FontSize', 8);
 
 % Plot 6: Velocity Error by Trial
 subplot(2, 4, 6);
 hold on;
 for trial = 1:n_trials
     trial_idx = phases_indices{trial};
-    plot(trial_idx, vel_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5, 'DisplayName', sprintf('Trial %d', trial));
+    plot(trial_idx, vel_error(trial_idx), 'Color', colors{trial}, 'LineWidth', 1.5);
 end
 grid on; xlabel('Time (steps)'); ylabel('Velocity Error (m/s)');
 title('Velocity RMSE: Truth vs Learned');
-legend('Location', 'best', 'FontSize', 8);
 
 % Plot 7: Free Energy Trajectory
 subplot(2, 4, 7);
@@ -548,31 +548,33 @@ sgtitle(sprintf(['3D Multi-Trial Sensorimotor Reaching - Rao & Ballard Predictiv
 % SAVE FIGURE
 % ====================================================================
 
-fprintf('Saving figure...\n');
+fprintf('Saving figure to disk...\n');
 
 output_dir = './figures';
 if ~exist(output_dir, 'dir')
     mkdir(output_dir);
 end
 
+% Save as PNG with simple approach
 try
     figure_filename = fullfile(output_dir, '3D_reaching_trajectories.png');
-    print(gcf, figure_filename, '-dpng', '-r150');
-    fprintf('✓ Figure saved to: %s\n', figure_filename);
+    saveas(fig, figure_filename, 'png');
+    fprintf('✓ PNG saved: %s\n', figure_filename);
 catch ME
-    fprintf('Warning: Could not save PNG: %s\n', ME.message);
+    fprintf('Warning: PNG save failed: %s\n', ME.message);
 end
 
+% Save as PDF
 try
     pdf_filename = fullfile(output_dir, '3D_reaching_trajectories.pdf');
-    print(gcf, pdf_filename, '-dpdf', '-r150');
-    fprintf('✓ Figure saved to: %s\n', pdf_filename);
+    saveas(fig, pdf_filename, 'pdf');
+    fprintf('✓ PDF saved: %s\n', pdf_filename);
 catch ME
-    fprintf('Warning: Could not save PDF: %s\n', ME.message);
+    fprintf('Warning: PDF save failed: %s\n', ME.message);
 end
 
-% Close figure to free memory
-close(gcf);
+% Close figure
+close(fig);
 
 % ====================================================================
 % ANALYSIS SUMMARY (3D Multi-Trial)
