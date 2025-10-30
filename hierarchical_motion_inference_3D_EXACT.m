@@ -147,9 +147,14 @@ z_true(1) = initial_positions(1, 3);
 % Store trial information for visualization
 trial_start_positions = initial_positions;
 
-% L1: Proprioceptive state (start at initial position, zero velocity)
+% Pre-allocate representation matrices for ALL timesteps (CRITICAL!)
+R_L1 = zeros(N, n_L1, 'single');  % Proprioceptive state over time
+R_L2 = zeros(N, n_L2, 'single');  % Motor basis over time
+R_L3 = zeros(N, n_L3, 'single');  % Goal representation over time
+
+% Initialize first timestep for L1, L2, L3
 R_L1(1,1:3) = [x_true(1), y_true(1), z_true(1)];  % Position
-R_L1(1,4:6) = [vx_true(1), vy_true(1), vz_true(1)];  % Velocity
+R_L1(1,4:6) = [0, 0, 0];  % Velocity
 R_L1(1,7) = 1;  % Bias
 
 % L2: Motor basis functions (initialize randomly)
@@ -180,6 +185,7 @@ pred_L1 = zeros(N, n_L1, 'single');
 pred_L2 = zeros(N, n_L2, 'single');
 free_energy_all = zeros(1, N, 'single');
 reaching_error_all = zeros(1, N, 'single');
+learning_trace_W = zeros(1, N);  % Track weight learning magnitude
 
 % ====================================================================
 % MAIN LEARNING LOOP (3D)
