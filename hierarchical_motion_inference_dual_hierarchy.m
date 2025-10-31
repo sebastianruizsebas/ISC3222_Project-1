@@ -23,12 +23,131 @@ function results = hierarchical_motion_inference_dual_hierarchy(params, make_plo
     end
 
     % Suppress verbose initialization and parameter printouts when running under PSO (parallel optimization)
-    if ~exist('dh_params','var') || ~isfield(dh_params,'suppress_init_log') || ~dh_params.suppress_init_log
+    % Use the actual argument name `params` (PSO passes a struct named dh_params)
+    if ~(exist('params','var') && isstruct(params) && isfield(params,'suppress_init_log') && params.suppress_init_log)
         % ...existing code for printing initialization and parameters...
         % (If you want to see these logs, set dh_params.suppress_init_log = false)
     end
 
     weight_decay = 0.98;
+% --------------------------------------------------------------------
+% PARAMETER OVERRIDES, PHYSICS, TIMING, AND TASK SETUP
+% (Copied from the reference 'copy' implementation to ensure PSO
+%  passes minimal params and the function defines all runtime vars.)
+
+if nargin > 0 && isstruct(params)
+    % Override a subset of defaults with provided parameters
+    if isfield(params, 'eta_rep'), eta_rep = params.eta_rep; end
+    if isfield(params, 'eta_W'), eta_W = params.eta_W; end
+    if isfield(params, 'momentum'), momentum = params.momentum; end
+    if isfield(params, 'weight_decay'), weight_decay = params.weight_decay; end
+    if isfield(params, 'motor_gain'), motor_gain = params.motor_gain; end
+    if isfield(params, 'damping'), damping = params.damping; end
+    if isfield(params, 'reaching_speed_scale'), reaching_speed_scale = params.reaching_speed_scale; end
+    if isfield(params, 'decay_motor'), decay_motor = params.decay_motor; end
+    if isfield(params, 'decay_plan'), decay_plan = params.decay_plan; end
+    if isfield(params, 'W_plan_gain'), W_plan_gain = params.W_plan_gain; end
+    if isfield(params, 'W_motor_gain'), W_motor_gain = params.W_motor_gain; end
+    optimizer_mode = true;
+else
+    optimizer_mode = false;
+end
+
+% --- Physics parameters (can be provided via params) ---
+if nargin > 0 && isstruct(params)
+    if isfield(params, 'gravity'), gravity = params.gravity; end
+    if isfield(params, 'restitution'), restitution = params.restitution; end
+    if isfield(params, 'ground_friction'), ground_friction = params.ground_friction; end
+    if isfield(params, 'air_drag'), air_drag = params.air_drag; end
+end
+
+% Default physics params (if not provided)
+if ~exist('gravity', 'var'), gravity = 9.81; end            % m/s^2 downward
+if ~exist('restitution', 'var'), restitution = 0.75; end    % 0..1 bounce energy retained
+if ~exist('ground_friction', 'var'), ground_friction = 0.90; end % 0..1 lateral speed retained on bounce
+if ~exist('air_drag', 'var'), air_drag = 0.001; end         % small fractional velocity loss per step
+
+% ====================================================================
+% TASK CONFIGURATION: PLAYER CHASING MOVING BALL
+% ====================================================================
+
+% Timing defaults (can be overridden by params)
+dt = 0.01;              % Time step (s)
+T_per_trial = 2.5;      % Duration per trial (s) - smaller default for quicker runs
+n_trials = 4;           % Number of different ball trajectories
+
+if nargin > 0 && isstruct(params)
+    if isfield(params, 'dt'), dt = params.dt; end
+    if isfield(params, 'T_per_trial'), T_per_trial = params.T_per_trial; end
+    if isfield(params, 'n_trials'), n_trials = params.n_trials; end
+end
+
+T = T_per_trial * n_trials;  % Total duration
+t = 0:dt:T;
+N = length(t);
+
+% Construct trial phase indices (start:end step indices for each trial)
+trial_duration_steps = round(T_per_trial / dt);
+phases_indices = cell(n_trials, 1);
+for trial = 1:n_trials
+    start_idx = (trial - 1) * trial_duration_steps + 1;
+    end_idx = min(trial * trial_duration_steps, N);
+    phases_indices{trial} = start_idx:end_idx;
+end
+
+% Randomized ball trajectories (can be replaced via params later)
+rng(42);
+ball_trajectories = {};
+for trial = 1:n_trials
+    ball_trajectories{trial} = struct(...
+        'start_pos', randn(1, 3) * 0.5, ...
+        'velocity', randn(1, 3) * 0.5, ...
+        'acceleration', randn(1, 3) * 0.1 ...
+    );
+end
+
+% Workspace bounds
+workspace_bounds = [
+    -2, 2;      % X bounds
+    -2, 2;      % Y bounds
+    -1, 2       % Z bounds
+];
+
+% Initial player positions for each trial (random inside workspace)
+initial_positions = zeros(n_trials, 3);
+for trial = 1:n_trials
+    for dim = 1:3
+        initial_positions(trial, dim) = workspace_bounds(dim, 1) + ...
+            rand() * (workspace_bounds(dim, 2) - workspace_bounds(dim, 1));
+    end
+end
+
+% Layer dimensions (needed later when initializing representations)
+n_L0 = n_trials;        % One-hot encoding: which trial/task is active
+n_L1_motor = 7;         % [x,y,z,vx,vy,vz,bias]
+n_L2_motor = 6;
+n_L3_motor = 3;
+n_L1_plan = 7;
+n_L2_plan = 6;
+n_L3_plan = 3;
+
+% Initialize runtime arrays (positions, velocities, motors)
+x_player = zeros(1, N); y_player = zeros(1, N); z_player = zeros(1, N);
+vx_player = zeros(1, N); vy_player = zeros(1, N); vz_player = zeros(1, N);
+
+x_ball = zeros(1, N); y_ball = zeros(1, N); z_ball = zeros(1, N);
+vx_ball = zeros(1, N); vy_ball = zeros(1, N); vz_ball = zeros(1, N);
+
+motor_vx_motor = zeros(1, N); motor_vy_motor = zeros(1, N); motor_vz_motor = zeros(1, N);
+motor_vx_plan = zeros(1, N); motor_vy_plan = zeros(1, N); motor_vz_plan = zeros(1, N);
+
+% Motor dynamics defaults
+if ~exist('motor_gain', 'var'), motor_gain = 0.5; end
+if ~exist('damping', 'var'), damping = 0.85; end
+if ~exist('reaching_speed_scale', 'var'), reaching_speed_scale = 0.5; end
+
+% End insertion of runtime/task defaults
+% --------------------------------------------------------------------
 
 % NEW: Separate decay rates for motor vs. planning regions
 if ~exist('decay_motor', 'var')
