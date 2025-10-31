@@ -660,10 +660,10 @@ for i = 1:N-1
     % Update current trial if helper changed it
     current_trial = S.current_trial;
 
-    % Debug output (kept in main thread for clarity)
-    if mod(i, 1000) == 0 && i > 1000
-        fprintf('  Step %d: Motor π=[%.2f,%.2f] Plan π=[%.2f,%.2f] | Interception error=%.4f\n', ...
-            i, S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan, S.interception_error_all(i));
+    % Only print summary at the very last step
+    if i == N-1
+        fprintf('Motor π=[%.2f,%.2f] Plan π=[%.2f,%.2f] | Interception error=%.4f\n', ...
+            S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan, S.interception_error_all(i));
     end
     
 end  % End main loop
