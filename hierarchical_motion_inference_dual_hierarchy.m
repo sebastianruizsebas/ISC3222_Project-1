@@ -102,11 +102,21 @@ workspace_bounds = [
     -5, 10        % Z bounds
 ];
 
-% Initial player positions for each trial (random inside workspace)
+% Initial player positions for each trial
+% X and Y are randomized within workspace bounds; Z is fixed to ground
+% level (z=0) so the player always starts on the ground and can reach
+% bouncing passes more predictably. The z value can be overridden via
+% params.player_start_z if desired.
 initial_positions = zeros(n_trials, 3);
 for trial = 1:n_trials
-    for dim = 1:3
-        initial_positions(trial, dim) = workspace_bounds(dim, 1) + rand() * (workspace_bounds(dim, 2) - workspace_bounds(dim, 1));
+    % Random X, Y within workspace
+    initial_positions(trial, 1) = workspace_bounds(1, 1) + rand() * (workspace_bounds(1, 2) - workspace_bounds(1, 1));
+    initial_positions(trial, 2) = workspace_bounds(2, 1) + rand() * (workspace_bounds(2, 2) - workspace_bounds(2, 1));
+    % Fixed Z on ground (allow override via params.player_start_z)
+    if nargin > 0 && isstruct(params) && isfield(params, 'player_start_z')
+        initial_positions(trial, 3) = params.player_start_z;
+    else
+        initial_positions(trial, 3) = 0;
     end
 end
 
