@@ -456,6 +456,14 @@ for i = 1:N-1
         last_trial = n_trials;
         last_trial_indices = phases_indices{last_trial};
         last_step_idx = last_trial_indices(end);
+        % Try to get particle and iteration info from params if present
+        particle_num = -1;
+        pso_iter = -1;
+        pso_iter_total = -1;
+        if isfield(params, 'particle_num'), particle_num = params.particle_num; end
+        if isfield(params, 'pso_iter'), pso_iter = params.pso_iter; end
+        if isfield(params, 'pso_iter_total'), pso_iter_total = params.pso_iter_total; end
+        fprintf('PSO Particle %d | Iteration %d/%d\n', particle_num, pso_iter, pso_iter_total);
         fprintf('Parameters used (last step of last trial):\n');
         fprintf('  eta_rep = %.6f\n', P.eta_rep);
         fprintf('  eta_W = %.6f\n', P.eta_W);

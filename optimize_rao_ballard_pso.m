@@ -294,8 +294,6 @@ for iteration = 1:num_iterations
     % independent and write to separate cells/arrays.
     parfor p = 1:num_particles
         try
-            % Minimal per-particle reporting (not printed in parfor workers)
-
             % Map particle to dual-hierarchy params
             dh_params = struct();
             dh_params.eta_rep = particles(p).eta_rep;
@@ -308,17 +306,18 @@ for iteration = 1:num_iterations
             dh_params.reaching_speed_scale = particles(p).reaching_speed_scale;
             dh_params.W_plan_gain = particles(p).W_L2_goal_gain;
             dh_params.W_motor_gain = particles(p).W_L1_pos_gain;
-            % (fast debug overrides are disabled inside parfor for compiler safety)
             dh_params.save_results = false;
+            % Pass PSO context for printout
+            dh_params.particle_num = p;
+            dh_params.pso_iter = iteration;
+            dh_params.pso_iter_total = num_iterations;
 
             % Run model (worker returns results struct)
             res = hierarchical_motion_inference_dual_hierarchy(dh_params, false);
 
-            % Compute score from returned struct (same as serial path)
             if isfield(res, 'interception_error_all') && isfield(res, 'phases_indices')
                 interception_error_all_local = res.interception_error_all;
                 phases_indices_local = res.phases_indices;
-                % use final interception distance per trial
                 n_trials_model = numel(phases_indices_local);
                 trial_final = zeros(1, n_trials_model);
                 for tt = 1:n_trials_model
@@ -333,7 +332,6 @@ for iteration = 1:num_iterations
                 loaded_data_cell{p} = struct();
             end
 
-            % compute new personal best info (returned to main thread)
             personal_best_params_cell{p} = struct('eta_rep', particles(p).eta_rep, 'eta_W', particles(p).eta_W, ...
                 'momentum', particles(p).momentum, 'decay_L2_goal', particles(p).decay_L2_goal, 'decay_L1_motor', particles(p).decay_L1_motor, ...
                 'motor_gain', particles(p).motor_gain, 'damping', particles(p).damping, 'reaching_speed_scale', particles(p).reaching_speed_scale, ...
