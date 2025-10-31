@@ -20,14 +20,15 @@ function results = hierarchical_motion_inference_dual_hierarchy(params, make_plo
     % Default: make plots unless explicitly disabled
     if nargin < 2
         make_plots = true;
+    end
 
     % Suppress verbose initialization and parameter printouts when running under PSO (parallel optimization)
     if ~exist('dh_params','var') || ~isfield(dh_params,'suppress_init_log') || ~dh_params.suppress_init_log
         % ...existing code for printing initialization and parameters...
         % (If you want to see these logs, set dh_params.suppress_init_log = false)
     end
+
     weight_decay = 0.98;
-end
 
 % NEW: Separate decay rates for motor vs. planning regions
 if ~exist('decay_motor', 'var')
