@@ -13,13 +13,78 @@ fprintf('║  DUAL-HIERARCHY VISUALIZATION: PLAYER CHASING BALL         ║\n');
 fprintf('║  Motor Region (Stable) + Planning Region (Task-Specific)  ║\n');
 fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
 
-results_file = './tools/figures/3D_dual_hierarchy_results.mat';
+results_file = './figures/3D_dual_hierarchy_results_best.mat';
 if ~isfile(results_file)
     error('Results file not found: %s\nRun hierarchical_motion_inference_dual_hierarchy() first.', results_file);
 end
 
-load(results_file);
+loaded = load(results_file);
 fprintf('✓ Loaded: %s\n\n', results_file);
+
+% Backwards-compat: PSO saves a single struct (`best_data`) into the MAT file.
+% The visualizer expects variables like `x_player`, `x_ball`, `phases_indices`, etc.
+% If we loaded a struct, unpack its fields into the script workspace.
+if isfield(loaded, 'best_data') && isstruct(loaded.best_data)
+    bd = loaded.best_data;
+    fn = fieldnames(bd);
+    for k = 1:numel(fn)
+        try
+            % assign into current workspace
+            eval(sprintf('%s = bd.%s;', fn{k}, fn{k}));
+        catch
+            % ignore if assignment fails for any unusual field
+        end
+    end
+    fprintf('  Unpacked `best_data` struct into variables for visualization.\n');
+elseif isfield(loaded, 'results') && isstruct(loaded.results)
+    bd = loaded.results;
+    fn = fieldnames(bd);
+    for k = 1:numel(fn)
+        try
+            eval(sprintf('%s = bd.%s;', fn{k}, fn{k}));
+        catch
+        end
+    end
+    fprintf('  Unpacked `results` struct into variables for visualization.\n');
+else
+    % If the MAT contained variables directly, copy them into locals
+    vars = fieldnames(loaded);
+    for k = 1:numel(vars)
+        try
+            eval(sprintf('%s = loaded.%s;', vars{k}, vars{k}));
+        catch
+        end
+    end
+end
+
+% ----------------------------
+% Sanity checks & diagnostics
+% ----------------------------
+needed = {'x_player','y_player','z_player','x_ball','y_ball','z_ball', 'vx_ball','vy_ball','vz_ball','vx_player','vy_player','vz_player','phases_indices','interception_error_all','free_energy_all','learning_trace_W'};
+fprintf('\nSanity check: verifying required variables for plotting...\n');
+missing = {};
+for k = 1:numel(needed)
+    if ~exist(needed{k}, 'var') || isempty(eval(needed{k}))
+        missing{end+1} = needed{k}; %#ok<AGROW>
+    else
+        % report simple size info
+        val = eval(needed{k});
+        if iscell(val)
+            fprintf('  %s : cell with %d entries\n', needed{k}, numel(val));
+        else
+            fprintf('  %s : size = %s\n', needed{k}, mat2str(size(val)));
+        end
+    end
+end
+if ~isempty(missing)
+    warning('Missing or empty variables required for full plotting: %s\nFigures may be incomplete.', strjoin(missing, ', '));
+end
+
+% Helper to ensure vector orientation (row vectors are fine for MATLAB plotting)
+ensure_vector = @(v) (isvector(v) && ~isempty(v));
+
+% (Removed verbose per-variable diagnostics to avoid confusion.)
+
 
 % ====================================================================
 % SETUP
@@ -195,16 +260,24 @@ drawnow;
 % CREATE COMPARISON FIGURE: PER-COORDINATE TRACKING
 % ====================================================================
 
+% Position using normalized units so figures appear on most screens
 fig2 = figure('Name', 'Coordinate Tracking: Player vs Ball', ...
-    'Position', [100, 1050, 1400, 800], 'Color', 'white', 'Visible', 'on');
+    'Units', 'normalized', 'Position', [0.05, 0.05, 0.45, 0.4], 'Color', 'white', 'Visible', 'on');
 
 fprintf('Plotting per-coordinate tracking...\n');
+
+% Clear figure and ensure it's active
+figure(fig2); clf(fig2);
 
 % X Coordinate
 subplot(3, 1, 1);
 hold on;
-plot(x_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball X');
-plot(x_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player X');
+if exist('x_ball','var') && exist('x_player','var') && ~isempty(x_ball) && ~isempty(x_player)
+    plot(x_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball X');
+    plot(x_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player X');
+else
+    text(0.5,0.5,'No X data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 ylabel('X Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
 title('X Coordinate Tracking', 'FontSize', 12, 'FontWeight', 'bold');
@@ -220,8 +293,12 @@ end
 % Y Coordinate
 subplot(3, 1, 2);
 hold on;
-plot(y_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball Y');
-plot(y_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player Y');
+if exist('y_ball','var') && exist('y_player','var') && ~isempty(y_ball) && ~isempty(y_player)
+    plot(y_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball Y');
+    plot(y_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player Y');
+else
+    text(0.5,0.5,'No Y data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 ylabel('Y Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
 title('Y Coordinate Tracking', 'FontSize', 12, 'FontWeight', 'bold');
@@ -236,8 +313,12 @@ end
 % Z Coordinate
 subplot(3, 1, 3);
 hold on;
-plot(z_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball Z');
-plot(z_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player Z');
+if exist('z_ball','var') && exist('z_player','var') && ~isempty(z_ball) && ~isempty(z_player)
+    plot(z_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball Z');
+    plot(z_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player Z');
+else
+    text(0.5,0.5,'No Z data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 xlabel('Time (steps)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('Z Position (m)', 'FontSize', 11, 'FontWeight', 'bold');
@@ -259,15 +340,28 @@ drawnow;
 % ====================================================================
 
 fig3 = figure('Name', 'Velocity Analysis', ...
-    'Position', [100, 2050, 1400, 800], 'Color', 'white', 'Visible', 'on');
+    'Units', 'normalized', 'Position', [0.55, 0.05, 0.4, 0.4], 'Color', 'white', 'Visible', 'on');
 
 fprintf('Plotting velocity comparisons...\n');
+
+figure(fig3); clf(fig3);
 
 % VX
 subplot(3, 1, 1);
 hold on;
-plot(vx_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VX');
-plot(vx_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VX');
+if exist('vx_ball','var') && exist('vx_player','var') && ~isempty(vx_ball) && ~isempty(vx_player)
+    vb = double(vx_ball(:)); vp = double(vx_player(:));
+    vb(~isfinite(vb)) = NaN; vp(~isfinite(vp)) = NaN;
+    if all(isnan(vb)) && all(isnan(vp))
+        text(0.5,0.5,'VX arrays contain only NaN/Inf','HorizontalAlignment','center','Units','normalized');
+    else
+        plot(vb, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VX');
+        plot(vp, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VX');
+        axis tight;
+    end
+else
+    text(0.5,0.5,'No VX data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 ylabel('VX (m/s)', 'FontSize', 11, 'FontWeight', 'bold');
 title('X Velocity Tracking', 'FontSize', 12, 'FontWeight', 'bold');
@@ -282,8 +376,19 @@ end
 % VY
 subplot(3, 1, 2);
 hold on;
-plot(vy_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VY');
-plot(vy_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VY');
+if exist('vy_ball','var') && exist('vy_player','var') && ~isempty(vy_ball) && ~isempty(vy_player)
+    vb = double(vy_ball(:)); vp = double(vy_player(:));
+    vb(~isfinite(vb)) = NaN; vp(~isfinite(vp)) = NaN;
+    if all(isnan(vb)) && all(isnan(vp))
+        text(0.5,0.5,'VY arrays contain only NaN/Inf','HorizontalAlignment','center','Units','normalized');
+    else
+        plot(vb, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VY');
+        plot(vp, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VY');
+        axis tight;
+    end
+else
+    text(0.5,0.5,'No VY data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 ylabel('VY (m/s)', 'FontSize', 11, 'FontWeight', 'bold');
 title('Y Velocity Tracking', 'FontSize', 12, 'FontWeight', 'bold');
@@ -298,8 +403,19 @@ end
 % VZ
 subplot(3, 1, 3);
 hold on;
-plot(vz_ball, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VZ');
-plot(vz_player, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VZ');
+if exist('vz_ball','var') && exist('vz_player','var') && ~isempty(vz_ball) && ~isempty(vz_player)
+    vb = double(vz_ball(:)); vp = double(vz_player(:));
+    vb(~isfinite(vb)) = NaN; vp(~isfinite(vp)) = NaN;
+    if all(isnan(vb)) && all(isnan(vp))
+        text(0.5,0.5,'VZ arrays contain only NaN/Inf','HorizontalAlignment','center','Units','normalized');
+    else
+        plot(vb, 'b-', 'LineWidth', 2.5, 'DisplayName', 'Ball VZ');
+        plot(vp, 'r--', 'LineWidth', 2, 'DisplayName', 'Player VZ');
+        axis tight;
+    end
+else
+    text(0.5,0.5,'No VZ data available','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 xlabel('Time (steps)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('VZ (m/s)', 'FontSize', 11, 'FontWeight', 'bold');
@@ -321,13 +437,23 @@ drawnow;
 % ====================================================================
 
 fig4 = figure('Name', 'Learning Dynamics', ...
-    'Position', [100, 2950, 1400, 600], 'Color', 'white', 'Visible', 'on');
+    'Units', 'normalized', 'Position', [0.05, 0.5, 0.9, 0.45], 'Color', 'white', 'Visible', 'on');
 
 fprintf('Plotting learning dynamics...\n');
 
+figure(fig4); clf(fig4);
+
 % Free Energy
 subplot(1, 2, 1);
-semilogy(free_energy_all, 'k-', 'LineWidth', 2.5);
+if exist('free_energy_all','var') && ~isempty(free_energy_all)
+    y = double(free_energy_all(:));
+    % Replace non-finite or non-positive values with eps for log plotting
+    y(~isfinite(y) | y <= 0) = eps;
+    semilogy(y, 'k-', 'LineWidth', 2.5);
+    axis tight;
+else
+    text(0.5,0.5,'No Free Energy data','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 xlabel('Time (steps)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('Free Energy (log scale)', 'FontSize', 11, 'FontWeight', 'bold');
@@ -341,7 +467,14 @@ end
 
 % Learning Trace
 subplot(1, 2, 2);
-semilogy(learning_trace_W + 1e-10, 'g-', 'LineWidth', 2.5);
+if exist('learning_trace_W','var') && ~isempty(learning_trace_W)
+    lw = double(learning_trace_W(:));
+    lw(~isfinite(lw) | lw <= 0) = eps;
+    semilogy(lw + 1e-10, 'g-', 'LineWidth', 2.5);
+    axis tight;
+else
+    text(0.5,0.5,'No learning trace data','HorizontalAlignment','center','Units','normalized');
+end
 grid on;
 xlabel('Time (steps)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('Weight Change Magnitude (log scale)', 'FontSize', 11, 'FontWeight', 'bold');

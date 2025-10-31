@@ -22,12 +22,12 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 20;  % Each particle = one parameter set
+num_particles = 25;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 30;  % Each iteration = all particles tested
+num_iterations = 35;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 600 trials
+% Total evaluations will be: num_particles * num_iterations = 875 trials
 total_evals = num_particles * num_iterations;
 
 fprintf('PSO CONFIGURATION:\n');
@@ -67,6 +67,9 @@ param_bounds.decay_L2_goal.min = 0.10;  % L2 weight decay
 param_bounds.decay_L2_goal.max = 0.99;
 param_bounds.decay_L1_motor.min = 0.10; % L1 weight decay
 param_bounds.decay_L1_motor.max = 0.99;
+% GLOBAL WEIGHT DECAY (single scalar applied across trial transfers)
+param_bounds.weight_decay.min = 0.60;
+param_bounds.weight_decay.max = 0.999;
 
 % MOTOR DYNAMICS (linear scale, affects trajectory quality)
 param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
@@ -117,6 +120,7 @@ fprintf('  W_L2_goal_gain: [%.3f, %.2f]\n', ...
     param_bounds.W_L2_goal_gain.min, param_bounds.W_L2_goal_gain.max);
 fprintf('  W_L1_pos_gain: [%.4f, %.3f]\n\n', ...
     param_bounds.W_L1_pos_gain.min, param_bounds.W_L1_pos_gain.max);
+fprintf('WEIGHT DECAY (global): [%.3f, %.3f]\n\n', param_bounds.weight_decay.min, param_bounds.weight_decay.max);
 
 fprintf('OBJECTIVE FUNCTION WEIGHTS:\n');
 fprintf('  Reaching distance improvement: %.1f\n', objective_weights.reaching_distance);
@@ -166,6 +170,11 @@ for p = 1:num_particles
     dec_L1_max = param_bounds.decay_L1_motor.max;
     dec_L1_cell = dec_L1_min + (p-1) * (dec_L1_max - dec_L1_min) / num_particles;
     particles(p).decay_L1_motor = dec_L1_cell + rand() * (dec_L1_max - dec_L1_min) / num_particles;
+    % GLOBAL WEIGHT DECAY (single scalar)
+    wd_min = param_bounds.weight_decay.min;
+    wd_max = param_bounds.weight_decay.max;
+    wd_cell = wd_min + (p-1) * (wd_max - wd_min) / num_particles;
+    particles(p).weight_decay = wd_cell + rand() * (wd_max - wd_min) / num_particles;
     
     % MOTOR DYNAMICS
     mg_min = param_bounds.motor_gain.min;
@@ -215,6 +224,8 @@ for p = 1:num_particles
         rand() * 4 * (param_bounds.W_L2_goal_gain.max - param_bounds.W_L2_goal_gain.min);
     particles(p).vel_W_L1_pos_gain = -2 * (param_bounds.W_L1_pos_gain.max - param_bounds.W_L1_pos_gain.min) + ...
         rand() * 4 * (param_bounds.W_L1_pos_gain.max - param_bounds.W_L1_pos_gain.min);
+    particles(p).vel_weight_decay = -2 * (param_bounds.weight_decay.max - param_bounds.weight_decay.min) + ...
+        rand() * 4 * (param_bounds.weight_decay.max - param_bounds.weight_decay.min);
     
     % Initialize particle's best position and score
     particles(p).best_eta_rep = particles(p).eta_rep;
@@ -227,12 +238,13 @@ for p = 1:num_particles
     particles(p).best_reaching_speed_scale = particles(p).reaching_speed_scale;
     particles(p).best_W_L2_goal_gain = particles(p).W_L2_goal_gain;
     particles(p).best_W_L1_pos_gain = particles(p).W_L1_pos_gain;
+    particles(p).best_weight_decay = particles(p).weight_decay;
     particles(p).best_score = inf;
 end
 
 % Global best tracking
     global_best_score = inf;
-    global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, 'decay_L2_goal', nan, 'decay_L1_motor', nan, 'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, 'W_L2_goal_gain', nan, 'W_L1_pos_gain', nan);
+    global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, 'decay_L2_goal', nan, 'decay_L1_motor', nan, 'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, 'W_L2_goal_gain', nan, 'W_L1_pos_gain', nan, 'weight_decay', nan);
 
 fprintf('Swarm initialized with %d SPREAD-OUT particles.\n', num_particles);
 fprintf('Particles distributed across entire parameter space (stratified sampling).\n\n');
@@ -306,6 +318,7 @@ for iteration = 1:num_iterations
             dh_params.reaching_speed_scale = particles(p).reaching_speed_scale;
             dh_params.W_plan_gain = particles(p).W_L2_goal_gain;
             dh_params.W_motor_gain = particles(p).W_L1_pos_gain;
+            dh_params.weight_decay = particles(p).weight_decay;
             dh_params.save_results = false;
             % Pass PSO context for printout
             dh_params.particle_num = p;
@@ -335,7 +348,7 @@ for iteration = 1:num_iterations
             personal_best_params_cell{p} = struct('eta_rep', particles(p).eta_rep, 'eta_W', particles(p).eta_W, ...
                 'momentum', particles(p).momentum, 'decay_L2_goal', particles(p).decay_L2_goal, 'decay_L1_motor', particles(p).decay_L1_motor, ...
                 'motor_gain', particles(p).motor_gain, 'damping', particles(p).damping, 'reaching_speed_scale', particles(p).reaching_speed_scale, ...
-                'W_L2_goal_gain', particles(p).W_L2_goal_gain, 'W_L1_pos_gain', particles(p).W_L1_pos_gain);
+                'W_L2_goal_gain', particles(p).W_L2_goal_gain, 'W_L1_pos_gain', particles(p).W_L1_pos_gain, 'weight_decay', particles(p).weight_decay);
 
         catch MEpar
             scores(p) = inf;
@@ -365,6 +378,9 @@ for iteration = 1:num_iterations
                 particles(p).best_reaching_speed_scale = pb.reaching_speed_scale;
                 particles(p).best_W_L2_goal_gain = pb.W_L2_goal_gain;
                 particles(p).best_W_L1_pos_gain = pb.W_L1_pos_gain;
+                if isfield(pb, 'weight_decay')
+                    particles(p).best_weight_decay = pb.weight_decay;
+                end
             end
             fprintf('    ★ Particle %d new personal best: %.6f\n', p, current_score);
         end
@@ -382,6 +398,7 @@ for iteration = 1:num_iterations
             global_best_params.reaching_speed_scale = particles(p).reaching_speed_scale;
             global_best_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
             global_best_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
+            global_best_params.weight_decay = particles(p).weight_decay;
             fprintf('    ✯ NEW GLOBAL BEST (particle %d): %.6f ✯\n', p, global_best_score);
             try
                 out_dir = './figures'; if ~exist(out_dir, 'dir'), mkdir(out_dir); end
@@ -512,6 +529,15 @@ for iteration = 1:num_iterations
             c1 * r1 * (particles(p).best_W_L1_pos_gain - particles(p).W_L1_pos_gain) + ...
             c2 * r2 * (global_best_params.W_L1_pos_gain - particles(p).W_L1_pos_gain) + ...
             noise_wl1;
+
+        % weight_decay (linear scale)
+        r1 = rand(); r2 = rand();
+        wd_range = param_bounds.weight_decay.max - param_bounds.weight_decay.min;
+        noise_wd = noise_scale * wd_range * randn();
+        particles(p).vel_weight_decay = w * particles(p).vel_weight_decay + ...
+            c1 * r1 * (particles(p).best_weight_decay - particles(p).weight_decay) + ...
+            c2 * r2 * (global_best_params.weight_decay - particles(p).weight_decay) + ...
+            noise_wd;
         
         % Position updates
         % For log-scale parameters, position is updated on log scale then converted
@@ -529,6 +555,7 @@ for iteration = 1:num_iterations
         particles(p).reaching_speed_scale = particles(p).reaching_speed_scale + particles(p).vel_reaching_speed_scale;
         particles(p).W_L2_goal_gain = particles(p).W_L2_goal_gain + particles(p).vel_W_L2_goal_gain;
         particles(p).W_L1_pos_gain = particles(p).W_L1_pos_gain + particles(p).vel_W_L1_pos_gain;
+    particles(p).weight_decay = particles(p).weight_decay + particles(p).vel_weight_decay;
         
         % Enforce bounds on all parameters
         particles(p).eta_rep = max(10^param_bounds.eta_rep.log_min, ...
@@ -551,6 +578,7 @@ for iteration = 1:num_iterations
                                          min(param_bounds.W_L2_goal_gain.max, particles(p).W_L2_goal_gain));
         particles(p).W_L1_pos_gain = max(param_bounds.W_L1_pos_gain.min, ...
                                         min(param_bounds.W_L1_pos_gain.max, particles(p).W_L1_pos_gain));
+        particles(p).weight_decay = max(param_bounds.weight_decay.min, min(param_bounds.weight_decay.max, particles(p).weight_decay));
     end
 end
 
@@ -572,6 +600,7 @@ fprintf('    momentum:                  %.6f\n', global_best_params.momentum);
 fprintf('\n  WEIGHT DECAY (trial transfer):\n');
 fprintf('    decay_L2_goal:             %.6f\n', global_best_params.decay_L2_goal);
 fprintf('    decay_L1_motor:            %.6f\n', global_best_params.decay_L1_motor);
+fprintf('    weight_decay (global):     %.6f\n', global_best_params.weight_decay);
 fprintf('\n  MOTOR DYNAMICS (trajectory quality):\n');
 fprintf('    motor_gain:                %.6f\n', global_best_params.motor_gain);
 fprintf('    damping:                   %.6f\n', global_best_params.damping);
@@ -623,6 +652,7 @@ try
         ps.reaching_speed_scale = particles(ip).best_reaching_speed_scale;
         ps.W_L2_goal_gain = particles(ip).best_W_L2_goal_gain;
         ps.W_L1_pos_gain = particles(ip).best_W_L1_pos_gain;
+    ps.weight_decay = particles(ip).best_weight_decay;
 
         leader_list(k).score = sorted_scores(k);
         leader_list(k).params = ps;

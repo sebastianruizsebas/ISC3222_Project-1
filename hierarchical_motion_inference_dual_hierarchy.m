@@ -95,30 +95,152 @@ for trial = 1:n_trials
     phases_indices{trial} = start_idx:end_idx;
 end
 
-% Randomized ball trajectories (can be replaced via params later)
-rng(42);
-ball_trajectories = {};
-for trial = 1:n_trials
-    ball_trajectories{trial} = struct(...
-        'start_pos', randn(1, 3) * 0.5, ...
-        'velocity', randn(1, 3) * 0.5, ...
-        'acceleration', randn(1, 3) * 0.1 ...
-    );
-end
-
-% Workspace bounds
+% Workspace bounds (used for generating player starts and ball trajectories)
 workspace_bounds = [
     -10, 10;      % X bounds
     -10, 10;      % Y bounds
-    -5, 10       % Z bounds
+    -5, 10        % Z bounds
 ];
 
 % Initial player positions for each trial (random inside workspace)
 initial_positions = zeros(n_trials, 3);
 for trial = 1:n_trials
     for dim = 1:3
-        initial_positions(trial, dim) = workspace_bounds(dim, 1) + ...
-            rand() * (workspace_bounds(dim, 2) - workspace_bounds(dim, 1));
+        initial_positions(trial, dim) = workspace_bounds(dim, 1) + rand() * (workspace_bounds(dim, 2) - workspace_bounds(dim, 1));
+    end
+end
+
+% Randomized ball trajectories (can be replaced via params later)
+rng(42);
+ball_trajectories = {};
+% Optional: ensure the generated trajectory passes within an "opportunity" radius
+% of the player's start position for that trial (gives player a chance to intercept
+% but does NOT force the controller to succeed).
+if nargin > 0 && isstruct(params) && isfield(params, 'ensure_opportunity') && params.ensure_opportunity
+    ensure_opportunity = true;
+    if isfield(params, 'opportunity_radius')
+        opportunity_radius = params.opportunity_radius;
+    else
+        opportunity_radius = 1.5;
+    end
+    if isfield(params, 'opportunity_max_attempts')
+        opportunity_max_attempts = params.opportunity_max_attempts;
+    else
+        opportunity_max_attempts = 200;
+    end
+else
+    ensure_opportunity = false;
+end
+% Optional reachable-set check: ensure player (with kinematic limits) can reach
+% the passing point in time. This is a conservative check assuming player
+% starts from rest at the trial start.
+if nargin > 0 && isstruct(params) && isfield(params, 'ensure_reachable') && params.ensure_reachable
+    ensure_reachable = true;
+    if isfield(params, 'player_max_speed')
+        player_max_speed = params.player_max_speed;
+    else
+        player_max_speed = 2.0;
+    end
+    if isfield(params, 'player_max_accel')
+        player_max_accel = params.player_max_accel;
+    else
+        player_max_accel = 5.0;
+    end
+    if isfield(params, 'reachable_tolerance')
+        reachable_tolerance = params.reachable_tolerance;
+    else
+        reachable_tolerance = 0.05;
+    end
+else
+    ensure_reachable = false;
+end
+
+for trial = 1:n_trials
+    attempts = 0;
+    accepted = false;
+    while ~accepted
+        attempts = attempts + 1;
+        % base random start/velocity/accel
+        start_pos = randn(1, 3) * 0.5;
+        velocity = randn(1, 3) * 0.5;
+        acceleration = randn(1, 3) * 0.1;
+        ball_trajectories{trial} = struct('start_pos', start_pos, 'velocity', velocity, 'acceleration', acceleration);
+
+        if ~ensure_opportunity
+            accepted = true;
+        else
+            % simulate a quick forward pass (no collisions) to see min distance to player start
+            player_start = initial_positions(trial, :)';
+            dt_check = dt;
+            n_steps_check = round(T_per_trial / dt_check);
+            x = ball_trajectories{trial}.start_pos(:);
+            v = ball_trajectories{trial}.velocity(:);
+            a = ball_trajectories{trial}.acceleration(:) + [0;0; -gravity];
+            min_d = inf; min_k = 1;
+            % Bounce-aware pre-simulation: include air drag, ground collisions
+            if isstruct(params) && isfield(params, 'ground_z')
+                ground_z = params.ground_z;
+            else
+                ground_z = workspace_bounds(3,1);
+            end
+            min_d = inf; min_k = 1;
+            for kk = 1:n_steps_check
+                % integrate acceleration
+                v = v + a * dt_check;
+                % air drag
+                v = v * (1 - air_drag);
+                % integrate position
+                x = x + v * dt_check;
+                % collision with ground plane (bounce + tangential friction)
+                if x(3) <= ground_z
+                    x(3) = ground_z;
+                    if v(3) < 0
+                        v(3) = -restitution * v(3);
+                    end
+                    % damp tangential components
+                    v(1:2) = v(1:2) * ground_friction;
+                    if abs(v(3)) < 1e-3
+                        v(3) = 0;
+                    end
+                end
+                % clamp to workspace bounds (so rebounds don't escape domain)
+                x(1) = min(max(x(1), workspace_bounds(1,1)), workspace_bounds(1,2));
+                x(2) = min(max(x(2), workspace_bounds(2,1)), workspace_bounds(2,2));
+                x(3) = min(max(x(3), workspace_bounds(3,1)), workspace_bounds(3,2));
+
+                d = norm(x - player_start);
+                if d < min_d
+                    min_d = d;
+                    min_k = kk;
+                end
+            end
+            % geometric opportunity check
+            geom_ok = (~ensure_opportunity) || (min_d <= opportunity_radius);
+            reach_ok = true;
+            if ensure_reachable
+                % available time until passing point (seconds)
+                time_to_pass = (min_k - 1) * dt_check;
+                % conservative reachable distance calculation assuming start from rest
+                t_accel = player_max_speed / max(1e-6, player_max_accel);
+                if time_to_pass <= t_accel
+                    d_max = 0.5 * player_max_accel * (time_to_pass^2);
+                else
+                    d_max = 0.5 * player_max_accel * (t_accel^2) + player_max_speed * (time_to_pass - t_accel);
+                end
+                % allow a small tolerance (meters)
+                reach_ok = (min_d <= d_max + reachable_tolerance);
+            end
+            if geom_ok && reach_ok
+                accepted = true;
+            else
+                accepted = false;
+            end
+        end
+
+        if ~accepted && attempts >= opportunity_max_attempts
+            warning('Could not generate an interceptable trajectory for trial %d after %d attempts; accepting last trajectory.', trial, attempts);
+            accepted = true;
+        end
     end
 end
 
