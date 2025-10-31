@@ -59,15 +59,17 @@ pi_L2_motor_base = pi_L2_motor;
 pi_L1_plan_base = pi_L1_plan;
 pi_L2_plan_base = pi_L2_plan;
 
-fprintf('LEARNING PARAMETERS:\n');
-fprintf('  η_rep = %.6f (representation learning rate)\n', eta_rep);
-fprintf('  η_W   = %.6f (weight matrix learning rate)\n', eta_W);
-fprintf('  Momentum = %.4f\n', momentum);
-fprintf('  Weight Decay (per-step) = %.4f\n', weight_decay);
-fprintf('  Decay at Phase (Motor) = %.4f (95%%-98%% retained)\n', decay_motor);
-fprintf('  Decay at Phase (Planning) = %.4f (70%%-80%% retained)\n', decay_plan);
-fprintf('  π_motor   = [%.0f, %.0f, %.0f]\n', pi_L1_motor, pi_L2_motor, pi_L3_motor);
-fprintf('  π_plan    = [%.0f, %.0f, %.0f]\n\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
+    if ~(exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false)
+        fprintf('LEARNING PARAMETERS:\n');
+        fprintf('  η_rep = %.6f (representation learning rate)\n', eta_rep);
+        fprintf('  η_W   = %.6f (weight matrix learning rate)\n', eta_W);
+        fprintf('  Momentum = %.4f\n', momentum);
+        fprintf('  Weight Decay (per-step) = %.4f\n', weight_decay);
+        fprintf('  Decay at Phase (Motor) = %.4f (95%%-98%% retained)\n', decay_motor);
+        fprintf('  Decay at Phase (Planning) = %.4f (70%%-80%% retained)\n', decay_plan);
+        fprintf('  π_motor   = [%.0f, %.0f, %.0f]\n', pi_L1_motor, pi_L2_motor, pi_L3_motor);
+        fprintf('  π_plan    = [%.0f, %.0f, %.0f]\n\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
+    end
 
 % ====================================================================
 % INITIALIZE REPRESENTATIONS
@@ -452,30 +454,17 @@ for i = 1:N-1
 
     % Only print summary for the last step of the last trial when running under PSO
     if i == N-1 && exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false
-        % Find last trial index
         last_trial = n_trials;
         last_trial_indices = phases_indices{last_trial};
         last_step_idx = last_trial_indices(end);
-        % Try to get particle and iteration info from params if present
         particle_num = -1;
         pso_iter = -1;
         pso_iter_total = -1;
         if isfield(params, 'particle_num'), particle_num = params.particle_num; end
         if isfield(params, 'pso_iter'), pso_iter = params.pso_iter; end
         if isfield(params, 'pso_iter_total'), pso_iter_total = params.pso_iter_total; end
-        fprintf('PSO Particle %d | Iteration %d/%d\n', particle_num, pso_iter, pso_iter_total);
-        fprintf('Parameters used (last step of last trial):\n');
-        fprintf('  eta_rep = %.6f\n', P.eta_rep);
-        fprintf('  eta_W = %.6f\n', P.eta_W);
-        fprintf('  momentum = %.6f\n', P.momentum);
-        fprintf('  weight_decay = %.6f\n', P.weight_decay);
-        fprintf('  decay_motor = %.6f\n', P.decay_motor);
-        fprintf('  decay_plan = %.6f\n', P.decay_plan);
-        fprintf('  motor_gain = %.6f\n', P.motor_gain);
-        fprintf('  damping = %.6f\n', P.damping);
-        fprintf('  reaching_speed_scale = %.6f\n', P.reaching_speed_scale);
-        fprintf('  W_plan_gain = %.6f\n', P.W_plan_gain);
-        fprintf('  W_motor_gain = %.6f\n', P.W_motor_gain);
+        fprintf('PSO Particle %d | Iteration %d/%d | ', particle_num, pso_iter, pso_iter_total);
+        fprintf('eta_rep=%.6f, eta_W=%.6f, momentum=%.6f, weight_decay=%.6f, decay_motor=%.6f, decay_plan=%.6f, motor_gain=%.6f, damping=%.6f, reaching_speed_scale=%.6f, W_plan_gain=%.6f, W_motor_gain=%.6f | ', P.eta_rep, P.eta_W, P.momentum, P.weight_decay, P.decay_motor, P.decay_plan, P.motor_gain, P.damping, P.reaching_speed_scale, P.W_plan_gain, P.W_motor_gain);
         fprintf('Final interception error (step %d, trial %d): %.6f\n', last_step_idx, last_trial, S.interception_error_all(last_step_idx));
     end
     

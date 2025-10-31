@@ -231,8 +231,8 @@ for p = 1:num_particles
 end
 
 % Global best tracking
-global_best_score = inf;
-global_best_params = struct();
+    global_best_score = inf;
+    global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, 'decay_L2_goal', nan, 'decay_L1_motor', nan, 'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, 'W_L2_goal_gain', nan, 'W_L1_pos_gain', nan);
 
 fprintf('Swarm initialized with %d SPREAD-OUT particles.\n', num_particles);
 fprintf('Particles distributed across entire parameter space (stratified sampling).\n\n');
