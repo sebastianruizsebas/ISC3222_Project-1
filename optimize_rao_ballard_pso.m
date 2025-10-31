@@ -286,12 +286,8 @@ for iteration = 1:num_iterations
         end
     end
 
-    % Start a safe parpool sized automatically from system specs
-    % Estimate per_worker_MB based on available memory and desired fraction
-    m = memory;
-    availMB = m.MemAvailableAllArrays/1024^2;
-    % Use 1/num_particles of available memory, but cap at 2000MB per worker
-    est_per_worker_MB = min(2000, max(500, floor(availMB / num_particles)));
+    % On clusters, memory() may not be available. Use a fixed per_worker_MB or cluster-specific logic.
+    est_per_worker_MB = 1000; % Default to 1000MB per worker for clusters
     suggested_workers = start_safe_parpool(est_per_worker_MB);
 
     % Use parfor to evaluate particles in parallel. Each iteration must be
