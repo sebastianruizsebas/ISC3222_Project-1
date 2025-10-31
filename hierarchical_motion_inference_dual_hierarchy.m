@@ -126,7 +126,19 @@ if nargin > 0 && isstruct(params) && isfield(params, 'ensure_opportunity') && pa
     if isfield(params, 'opportunity_max_attempts')
         opportunity_max_attempts = params.opportunity_max_attempts;
     else
-        opportunity_max_attempts = 200;
+        opportunity_max_attempts = 2000; % raise attempts to improve chance
+    end
+
+    % Directed sampling: with some probability bias candidates toward player start
+    if isfield(params, 'opportunity_directed_prob')
+        opportunity_directed_prob = params.opportunity_directed_prob;
+    else
+        opportunity_directed_prob = 0.25; % 25% candidates aimed at player
+    end
+    if isfield(params, 'opportunity_directed_speed_range')
+        opportunity_directed_speed_range = params.opportunity_directed_speed_range;
+    else
+        opportunity_directed_speed_range = [0.5, 3.0]; % horizontal speed range (m/s)
     end
 else
     ensure_opportunity = false;
@@ -160,10 +172,94 @@ for trial = 1:n_trials
     accepted = false;
     while ~accepted
         attempts = attempts + 1;
-        % base random start/velocity/accel
-        start_pos = randn(1, 3) * 0.5;
-        velocity = randn(1, 3) * 0.5;
-        acceleration = randn(1, 3) * 0.1;
+        % --- Candidate generation (improved) ---
+        % Strategy: pick a pass time t_pass and pass position near player_start,
+        % then analytically compute the initial velocity v0 that would place the
+        % ball at pass_pos at time t_pass under constant acceleration (including gravity).
+        % This creates candidates that are much more likely to pass near player_start.
+        player_start = initial_positions(trial, :)';
+
+        % pick a start position (random in workspace near center for diversity)
+        start_pos = [ workspace_bounds(1,1) + rand()*(workspace_bounds(1,2)-workspace_bounds(1,1)), ...
+                      workspace_bounds(2,1) + rand()*(workspace_bounds(2,2)-workspace_bounds(2,1)), ...
+                      max(workspace_bounds(3,1), 0) + 0.5 + rand()*2.0 ]; % bias start z above ground
+
+        % default small intrinsic ball acceleration (horizontal jitter); gravity handled separately
+        intrinsic_acc = [0; 0; 0];
+
+        % try directed analytic construction most of the time to improve acceptance
+    % Use configured directed-sampling probability (was accidentally hard-coded)
+    if ensure_opportunity && rand() < opportunity_directed_prob
+            % choose pass time within trial (avoid extremes)
+            min_t = max(0.05, 0.1 * T_per_trial);
+            max_t = max(min_t + 0.05, 0.9 * T_per_trial);
+            t_pass = min_t + rand() * (max_t - min_t);
+
+            % choose pass position as a point within opportunity_radius of player start
+            angle = 2*pi*rand();
+            r = rand() * opportunity_radius;
+            pass_offset_xy = [r*cos(angle); r*sin(angle)];
+            % slight vertical offset to allow flight arc
+            pass_z_offset = (-0.2) + rand()*0.4;
+            pass_pos = player_start + [pass_offset_xy; pass_z_offset];
+
+            % total acceleration acting on ball (intrinsic + gravity)
+            a_total = intrinsic_acc + [0; 0; -gravity];
+
+            % analytic initial velocity required to reach pass_pos at time t_pass:
+            % pass_pos = start_pos + v0 * t_pass + 0.5 * a_total * t_pass^2
+            v0 = (pass_pos - start_pos(:) - 0.5 * a_total * (t_pass^2)) / max(1e-9, t_pass);
+
+            % reject if required speed is unrealistic (keeps candidates feasible)
+            vmax_ball = 8.0; % m/s, tuneable upper limit for ball initial speed
+            if norm(v0) <= vmax_ball
+                velocity = v0(:)';            % row vector
+                acceleration = intrinsic_acc(:)'; % row vector (gravity applied in pre-sim)
+            else
+                % If the analytically-required v0 is too large, adjust the
+                % start_pos to produce a feasible v0 (<= vmax_ball) rather
+                % than falling back to an arbitrary weak random velocity.
+                % Strategy: place the start_pos along the line from the
+                % pass_pos backwards by distance = vmax_ball * t_pass (so
+                % the initial velocity toward pass_pos has magnitude vmax_ball),
+                % and include the 0.5*a_total*t^2 correction.
+                pass_pos_col = pass_pos(:);
+                a_term = 0.5 * a_total * (t_pass^2);
+                % Desired velocity vector (clamped to vmax_ball) pointing to pass_pos
+                dir_to_pass = pass_pos_col - start_pos(:);
+                nd = norm(dir_to_pass);
+                if nd < 1e-6
+                    unit_dir = [1;0;0];
+                else
+                    unit_dir = dir_to_pass / nd;
+                end
+                v_desired = vmax_ball * unit_dir;
+                % Compute a new start position that would require v_desired
+                new_start_col = pass_pos_col - v_desired * t_pass - a_term;
+                % Clamp to workspace bounds (respect workspace_bounds: columns are [xmin xmax; ymin ymax; zmin zmax])
+                new_start_col(1) = min(max(new_start_col(1), workspace_bounds(1,1)), workspace_bounds(1,2));
+                new_start_col(2) = min(max(new_start_col(2), workspace_bounds(2,1)), workspace_bounds(2,2));
+                new_start_col(3) = min(max(new_start_col(3), workspace_bounds(3,1)), workspace_bounds(3,2));
+                % Assign adjusted start_pos (keep row-vector convention used elsewhere)
+                start_pos = new_start_col(:)';
+                % Recompute v0 for the adjusted start_pos
+                v0_adj = (pass_pos_col - start_pos(:) - a_term) / max(1e-9, t_pass);
+                % Use the adjusted velocity and intrinsic acceleration
+                velocity = v0_adj(:)';
+                acceleration = intrinsic_acc(:)';
+                % If the adjusted v0 is still slightly above vmax_ball due to
+                % clamping to workspace, clamp its magnitude (maintain direction)
+                n_v0 = norm(velocity);
+                if n_v0 > vmax_ball * 1.001
+                    velocity = (velocity / n_v0) * vmax_ball;
+                end
+            end
+        else
+            % occasional pure-random candidate to preserve diversity
+            velocity = randn(1, 3) * 0.5;
+            acceleration = randn(1, 3) * 0.1;
+        end
+
         ball_trajectories{trial} = struct('start_pos', start_pos, 'velocity', velocity, 'acceleration', acceleration);
 
         if ~ensure_opportunity

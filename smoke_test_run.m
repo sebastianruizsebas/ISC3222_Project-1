@@ -1,40 +1,33 @@
-% smoke_test_run.m
-% Quick smoke test for hierarchical_motion_inference_dual_hierarchy
-% Creates a very short run to validate end-to-end behavior and saves a small MAT
-
-% Configure a short test (small T_per_trial and few trials)
+% build params (map CSV/PSO names -> function names)
 params = struct();
-params.dt = 0.01;               % time step
-params.T_per_trial = 0.5;       % seconds per trial (very short for smoke test)
-params.n_trials = 2;            % small number of trials
-params.eta_rep = 0.005;
-params.eta_W = 0.0005;
-params.momentum = 0.98;
-params.weight_decay = 0.98;
-% Do not write heavy per-particle files during smoke tests
-params.save_results = true;     % we will save a tiny results file for inspection
+params.eta_rep = 0.00121192463296075;
+params.eta_W  = 2.63321983368896e-05;
+params.momentum = 0.952164271513988;
+params.decay_plan  = 0.99;                 % decay_L2_goal
+params.decay_motor = 0.100892693348881;   % decay_L1_motor
+params.motor_gain = 1;
+params.damping = 0.711876080199316;
+params.reaching_speed_scale = 0.460970909671357;
+params.W_plan_gain  = 0.311927505462757;  % W_L2_goal_gain
+params.W_motor_gain = 0.001;              % W_L1_pos_gain
+params.weight_decay = 0.999;
 
-fprintf('\nRunning smoke test: short dual-hierarchy run (T_per_trial=%.3fs, n_trials=%d)\n', params.T_per_trial, params.n_trials);
+% task / physics options you asked about
+params.T_per_trial = 400;      % seconds per trial
+params.n_trials = 4;           % number of different trajectories
+params.ensure_opportunity = true;
+params.opportunity_radius = 1.2;
+params.opportunity_max_attempts = 1000;
+params.opportunity_directed_prob = 0.3;
+params.opportunity_directed_speed_range = [0.8, 2.5];
+params.ensure_reachable = true;
+params.player_max_speed = 2.5;          % m/s
+params.player_max_accel = 6.0;          % m/s^2
+params.reachable_tolerance = 0.10;
 
-try
-    results = hierarchical_motion_inference_dual_hierarchy(params, false);
+% other useful toggles
+params.save_results = true;   % don't write MAT file for smoke test
+params.ground_z = 0;           % set ground plane to z=0
 
-    outdir = fullfile('.', 'figures');
-    if ~exist(outdir, 'dir')
-        mkdir(outdir);
-    end
-    outfn = fullfile(outdir, 'smoke_test_results.mat');
-    save(outfn, 'results', '-v7.3');
-
-    rmse = sqrt(mean(results.interception_error_all.^2));
-    fprintf('Smoke test completed successfully. Results saved to: %s\n', outfn);
-    fprintf('Interception RMSE: %.6f m\n', rmse);
-catch ME
-    fprintf('Smoke test FAILED: %s\n', ME.message);
-    if isfield(ME, 'stack')
-        for k = 1:numel(ME.stack)
-            fprintf('  at %s (line %d)\n', ME.stack(k).file, ME.stack(k).line);
-        end
-    end
-    rethrow(ME);
-end
+% run without plots (fast / for PSO)
+results = hierarchical_motion_inference_dual_hierarchy(params, true);
