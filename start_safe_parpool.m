@@ -4,17 +4,17 @@ function suggested = start_safe_parpool(per_worker_MB)
 
 if nargin < 1 || isempty(per_worker_MB), per_worker_MB = 1000; end
 
+% On clusters, memory() may not be available. Use only CPU and cluster info.
 numLogical = java.lang.Runtime.getRuntime.availableProcessors;
-m = memory; availMB = m.MemAvailableAllArrays/1024^2;
 c = parcluster('local');
 max_cluster = c.NumWorkers;
 
 max_by_cpu = max(1, numLogical - 1);       % leave 1 core for OS
-max_by_mem = floor(availMB / per_worker_MB);
+% Skip memory-based limit on clusters
 
-suggested = max(1, min([max_by_cpu, max_by_mem, max_cluster]));
-fprintf('Suggested parpool workers: %d (logical=%d, availMB=%.0f, perWorkerMB=%d, clusterMax=%d)\n', ...
-    suggested, numLogical, availMB, per_worker_MB, max_cluster);
+suggested = max(1, min([max_by_cpu, max_cluster]));
+fprintf('Suggested parpool workers: %d (logical=%d, perWorkerMB=%d, clusterMax=%d)\n', ...
+    suggested, numLogical, per_worker_MB, max_cluster);
 
 pool = gcp('nocreate');
 if isempty(pool)
