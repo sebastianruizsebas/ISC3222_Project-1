@@ -1,0 +1,11 @@
+DUAL HIERARCHY WEIGHT MATRIX ANALYSIS
+Source: ./tools/figures/3D_dual_hierarchy_results.mat
+
+W_motor_L2_to_L1 shape: 7 x 6
+W_motor_L3_to_L2 shape: 6 x 3
+W_plan_L2_to_L1 shape : 7 x 6
+W_plan_L3_to_L2 shape : 6 x 3
+
+Velocity identity error (motor velocity rows vs identity): 0.001357
+Auxiliary motor contribution magnitude: 0.000027
+Planning goal coupling (first 3 rows norm): 0.019368

@@ -108,9 +108,9 @@ end
 
 % Workspace bounds
 workspace_bounds = [
-    -2, 2;      % X bounds
-    -2, 2;      % Y bounds
-    -1, 2       % Z bounds
+    -10, 10;      % X bounds
+    -10, 10;      % Y bounds
+    -5, 10       % Z bounds
 ];
 
 % Initial player positions for each trial (random inside workspace)
@@ -122,14 +122,55 @@ for trial = 1:n_trials
     end
 end
 
+% Ensure ball starts are sufficiently far from player initial positions
+% Default minimum separation (meters)
+min_start_sep = 0.5;
+if nargin > 0 && isstruct(params) && isfield(params, 'min_start_sep')
+    min_start_sep = params.min_start_sep;
+end
+
+for trial = 1:n_trials
+    player_pos = initial_positions(trial, :);
+    start_pos = ball_trajectories{trial}.start_pos;
+    sep = norm(start_pos - player_pos);
+    attempts = 0;
+    while sep < min_start_sep && attempts < 100
+        start_pos = [workspace_bounds(1,1) + rand()*(workspace_bounds(1,2)-workspace_bounds(1,1)), ...
+                     workspace_bounds(2,1) + rand()*(workspace_bounds(2,2)-workspace_bounds(2,1)), ...
+                     workspace_bounds(3,1) + rand()*(workspace_bounds(3,2)-workspace_bounds(3,1))];
+        ball_trajectories{trial}.start_pos = start_pos;
+        sep = norm(start_pos - player_pos);
+        attempts = attempts + 1;
+    end
+    if sep < min_start_sep
+        % fallback: place ball on the boundary of required separation
+        dir = randn(1,3); dir = dir / (norm(dir)+1e-9);
+        ball_trajectories{trial}.start_pos = player_pos + dir * min_start_sep;
+    end
+end
+
 % Layer dimensions (needed later when initializing representations)
+% NOTE: scale_factor controls how much to enlarge internal layers.
+scale_factor = 20.0;  % 2000% -> 20x
+
 n_L0 = n_trials;        % One-hot encoding: which trial/task is active
-n_L1_motor = 7;         % [x,y,z,vx,vy,vz,bias]
-n_L2_motor = 6;
-n_L3_motor = 3;
-n_L1_plan = 7;
-n_L2_plan = 6;
-n_L3_plan = 3;
+n_L1_motor = 7;         % keep L1 semantics [x,y,z,vx,vy,vz,bias] unchanged
+% scale internal layers (L2/L3) by factor (round to integer, at least 1)
+n_L2_motor = max(1, round(scale_factor * 6));
+n_L3_motor = max(1, round(scale_factor * 3));
+
+n_L1_plan = 7;          % keep L1 planning semantics unchanged
+n_L2_plan = max(1, round(scale_factor * 6));
+n_L3_plan = max(1, round(scale_factor * 3));
+
+% Semantic indices for L1 (position, velocity, bias). Placing these here
+% ensures idx_* are available before representations are initialized.
+n_pos = 3; n_vel = 3; n_bias = 1;
+idx_pos = 1:n_pos;
+idx_vel = n_pos + (1:n_vel);
+idx_bias = n_pos + n_vel + 1;
+
+% (Semantic L1 indices are defined above near the layer-dimension block)
 
 % Initialize runtime arrays (positions, velocities, motors)
 x_player = zeros(1, N); y_player = zeros(1, N); z_player = zeros(1, N);
@@ -217,10 +258,12 @@ x_player(1) = initial_positions(1, 1);
 y_player(1) = initial_positions(1, 2);
 z_player(1) = initial_positions(1, 3);
 
-% Motor L1 (proprioception)
-R_L1_motor(1, 1:3) = [x_player(1), y_player(1), z_player(1)];
-R_L1_motor(1, 4:6) = [0, 0, 0];
-R_L1_motor(1, 7) = 1;
+% Motor L1 (proprioception) - use semantic indices for positions/vel/bias
+R_L1_motor(1, idx_pos) = [x_player(1), y_player(1), z_player(1)];
+% velocity channels (pad/truncate to fit)
+tmp_vel_init = zeros(1, numel(idx_vel)); tmp_vel_init(1:min(3,numel(tmp_vel_init))) = 0;
+R_L1_motor(1, idx_vel) = tmp_vel_init;
+R_L1_motor(1, idx_bias) = 1;
 
 % Ball initial state
 x_ball(1) = ball_trajectories{1}.start_pos(1);
@@ -240,10 +283,15 @@ R_L2_motor(1, 1:3) = reach_direction * reaching_speed;
 R_L2_motor(1, 4:6) = 0.01 * randn(1, 3);
 R_L3_motor(1, 1:3) = reach_direction * reaching_speed;
 
-% Planning L1: ball position + goal
-R_L1_plan(1, 1:3) = [x_ball(1), y_ball(1), z_ball(1)];  % Ball position
-R_L1_plan(1, 4:6) = [x_ball(1), y_ball(1), z_ball(1)];  % Interception goal (initially same as ball)
-R_L1_plan(1, 7) = 1;
+% Planning L1: ball position + goal (use semantic idx)
+R_L1_plan(1, idx_pos) = [x_ball(1), y_ball(1), z_ball(1)];  % Ball position
+% planning velocity/goal channels (use ball pos as initial goal for available vel slots)
+tmp_goal = zeros(1, numel(idx_vel));
+vals = [x_ball(1), y_ball(1), z_ball(1)];
+ncopy = min(3, numel(tmp_goal));
+tmp_goal(1:ncopy) = vals(1:ncopy);
+R_L1_plan(1, idx_vel) = tmp_goal;
+R_L1_plan(1, idx_bias) = 1;
 
 % Planning L2/L3: initial policies
 R_L2_plan(1, 1:3) = reach_direction * reaching_speed;
@@ -262,31 +310,53 @@ fprintf('  R_L1_plan (ball + goal) initialized\n\n');
 % INITIALIZE WEIGHT MATRICES - DUAL HIERARCHY
 % ====================================================================
 
-% Motor region weights
+% Motor region weights (compute semantic indices so layer sizes can be scaled)
 W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);
 W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
 
-% Map L3_motor (3D velocity) to L1_motor (proprioceptive prediction)
-W_motor_L2_to_L1(4:6, 1:3) = eye(3, 3);  % Velocity commands → velocity predictions
-W_motor_L2_to_L1(1:3, 1:3) = 0.01 * eye(3, 3);  % Weak position coupling
-W_motor_L2_to_L1(7, :) = 0.01 * randn(1, n_L2_motor);
+% (semantic indices already defined earlier)
 
-% Map L2_motor (primitives) to L3_motor (output)
-W_motor_L3_to_L2(1:3, 1:3) = W_motor_gain * eye(3, 3);  % Primitives → output
-W_motor_L3_to_L2(4:6, 1:3) = 0.01 * randn(3, 3);
+% Map L3_motor (velocity-like outputs) into L1 velocity rows.
+map_vel = min(n_vel, n_L3_motor);
+W_motor_L2_to_L1(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
+
+% Weak position coupling from same L3 channels (if available)
+map_pos = min(n_pos, n_L3_motor);
+W_motor_L2_to_L1(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
+
+% Bias / offset row -- small random init
+W_motor_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
+
+% Initialize L3->L2 mapping with structured identity on the overlapping block
+map_block = min(n_L2_motor, n_L3_motor);
+fan_in3 = max(1, n_L3_motor);
+W_motor_L3_to_L2(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
+% remaining rows (if any) get small random init scaled by fan-in
+if n_L2_motor > map_block
+    W_motor_L3_to_L2(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
+end
 
 % Planning region weights
 W_plan_L2_to_L1 = zeros(n_L1_plan, n_L2_plan);
 W_plan_L3_to_L2 = zeros(n_L2_plan, n_L3_plan);
 
 % Map L3_plan (target velocity from planning) to L1_plan (ball + goal)
-W_plan_L2_to_L1(1:3, 1:3) = 0.01 * eye(3, 3);  % Weak ball position prediction
-W_plan_L2_to_L1(4:6, 1:3) = 0.1 * eye(3, 3);   % Goal prediction from policies
-W_plan_L2_to_L1(7, :) = 0.01 * randn(1, n_L2_plan);
+% Use same semantic indices (pos/vel/bias) so visualization and helper code keep working
+W_plan_L2_to_L1 = zeros(n_L1_plan, n_L2_plan);
+W_plan_L3_to_L2 = zeros(n_L2_plan, n_L3_plan);
 
-% Map L2_plan (policies) to L3_plan (planning output)
-W_plan_L3_to_L2(1:3, 1:3) = W_plan_gain * eye(3, 3);
-W_plan_L3_to_L2(4:6, 1:3) = 0.01 * randn(3, 3);
+map_vel_p = min(n_vel, n_L3_plan);
+map_pos_p = min(n_pos, n_L3_plan);
+W_plan_L2_to_L1(idx_pos(1:map_pos_p), 1:map_pos_p) = 0.01 * eye(map_pos_p);
+W_plan_L2_to_L1(idx_vel(1:map_vel_p), 1:map_vel_p) = 0.1 * eye(map_vel_p);
+W_plan_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_plan);
+
+map_block_p = min(n_L2_plan, n_L3_plan);
+fan_in3_p = max(1, n_L3_plan);
+W_plan_L3_to_L2(1:map_block_p, 1:map_block_p) = W_plan_gain * eye(map_block_p);
+if n_L2_plan > map_block_p
+    W_plan_L3_to_L2(map_block_p+1:end, 1:n_L3_plan) = (W_plan_gain / sqrt(fan_in3_p)) * 0.01 * randn(n_L2_plan-map_block_p, n_L3_plan);
+end
 
 % --- NEW: LATERAL (WITHIN-LAYER) WEIGHTS (small random init) ---
 rng(0); % reproducible lateral init
@@ -297,21 +367,21 @@ W_plan_L1_lat  = 0.01 * randn(n_L1_plan,  n_L1_plan);
 W_plan_L2_lat  = 0.01 * randn(n_L2_plan,  n_L2_plan);
 W_plan_L3_lat  = 0.01 * randn(n_L3_plan,  n_L3_plan);
 
-% Remove strong self-connections initially
-W_motor_L1_lat(1:n_L1_motor+1:end) = 0;
-W_motor_L2_lat(1:n_L2_motor+1:end) = 0;
-W_motor_L3_lat(1:n_L3_motor+1:end) = 0;
-W_plan_L1_lat(1:n_L1_plan+1:end)   = 0;
-W_plan_L2_lat(1:n_L2_plan+1:end)   = 0;
-W_plan_L3_lat(1:n_L3_plan+1:end)   = 0;
+% Remove strong self-connections initially (use size(...) to be robust to changes)
+W_motor_L1_lat(1:size(W_motor_L1_lat,1)+1:end) = 0;
+W_motor_L2_lat(1:size(W_motor_L2_lat,1)+1:end) = 0;
+W_motor_L3_lat(1:size(W_motor_L3_lat,1)+1:end) = 0;
+W_plan_L1_lat(1:size(W_plan_L1_lat,1)+1:end)   = 0;
+W_plan_L2_lat(1:size(W_plan_L2_lat,1)+1:end)   = 0;
+W_plan_L3_lat(1:size(W_plan_L3_lat,1)+1:end)   = 0;
 
 fprintf('WEIGHT MATRICES INITIALIZED:\n');
 fprintf('  Motor Region:\n');
-fprintf('    W_motor_L2_to_L1: Motor Basis → Proprioception (6×7)\n');
-fprintf('    W_motor_L3_to_L2: Output → Basis (3×6)\n');
+fprintf('    W_motor_L2_to_L1: Motor Basis → Proprioception (%dx%d)\n', n_L1_motor, n_L2_motor);
+fprintf('    W_motor_L3_to_L2: Output → Basis (%dx%d)\n', n_L2_motor, n_L3_motor);
 fprintf('  Planning Region:\n');
-fprintf('    W_plan_L2_to_L1: Policies → Goal State (6×7)\n');
-fprintf('    W_plan_L3_to_L2: Output → Policies (3×6)\n\n');
+fprintf('    W_plan_L2_to_L1: Policies → Goal State (%dx%d)\n', n_L1_plan, n_L2_plan);
+fprintf('    W_plan_L3_to_L2: Output → Policies (%dx%d)\n\n', n_L2_plan, n_L3_plan);
 
 % ====================================================================
 % ERROR AND LEARNING TRACKING
@@ -434,6 +504,20 @@ P.workspace_bounds = workspace_bounds; P.motor_gain = motor_gain; P.damping = da
 P.eta_rep = eta_rep; P.eta_W = eta_W; P.momentum = momentum; P.weight_decay = weight_decay;
 P.decay_motor = decay_motor; P.decay_plan = decay_plan; P.W_plan_gain = W_plan_gain; P.W_motor_gain = W_motor_gain;
 P.pi_smooth_alpha = pi_smooth_alpha; P.pi_max_step_ratio = pi_max_step_ratio; P.window_size = window_size;
+% Pass semantic indices to helper so it can be agnostic to L1 sizing
+P.idx_pos = idx_pos; P.idx_vel = idx_vel; P.idx_bias = idx_bias;
+% Termination distance: when player is within this distance of ball the session ends
+P.termination_distance = 0.15;
+if nargin > 0 && isstruct(params) && isfield(params, 'termination_distance')
+    P.termination_distance = params.termination_distance;
+end
+
+% Ground plane override: prefer explicit params.ground_z if given, otherwise use workspace lower bound
+if nargin > 0 && isstruct(params) && isfield(params, 'ground_z')
+    P.ground_z = params.ground_z;
+else
+    P.ground_z = workspace_bounds(3,1);
+end
 
 for i = 1:N-1
     if mod(i, 100) == 0, fprintf('.'); end
@@ -444,60 +528,66 @@ for i = 1:N-1
     if i > 1
         for trial = 2:n_trials
             if i == phases_indices{trial}(1)
-                % Reset player position and ball trajectory for new trial
-                x_player(i) = initial_positions(trial, 1);
-                y_player(i) = initial_positions(trial, 2);
-                z_player(i) = initial_positions(trial, 3);
-                vx_player(i) = 0;
-                vy_player(i) = 0;
-                vz_player(i) = 0;
+                % Reset player position and ball trajectory for new trial (write into S so helper uses authoritative state)
+                S.x_player(i) = initial_positions(trial, 1);
+                S.y_player(i) = initial_positions(trial, 2);
+                S.z_player(i) = initial_positions(trial, 3);
+                S.vx_player(i) = 0;
+                S.vy_player(i) = 0;
+                S.vz_player(i) = 0;
+
+                % Reset ball for new trial (write into S)
+                S.x_ball(i) = ball_trajectories{trial}.start_pos(1);
+                S.y_ball(i) = ball_trajectories{trial}.start_pos(2);
+                S.z_ball(i) = ball_trajectories{trial}.start_pos(3);
+                S.vx_ball(i) = ball_trajectories{trial}.velocity(1);
+                S.vy_ball(i) = ball_trajectories{trial}.velocity(2);
+                S.vz_ball(i) = ball_trajectories{trial}.velocity(3);
                 
-                % Reset ball for new trial
-                x_ball(i) = ball_trajectories{trial}.start_pos(1);
-                y_ball(i) = ball_trajectories{trial}.start_pos(2);
-                z_ball(i) = ball_trajectories{trial}.start_pos(3);
-                vx_ball(i) = ball_trajectories{trial}.velocity(1);
-                vy_ball(i) = ball_trajectories{trial}.velocity(2);
-                vz_ball(i) = ball_trajectories{trial}.velocity(3);
+                % Update task context (L0) in S
+                S.R_L0(i, :) = 0;
+                S.R_L0(i, trial) = 1;
                 
-                % Update task context (L0)
-                R_L0(i, :) = 0;
-                R_L0(i, trial) = 1;
+                % Reset motor region representations (write into S using semantic L1 indices)
+                S.R_L1_motor(i, idx_pos) = [S.x_player(i), S.y_player(i), S.z_player(i)];
+                tmpv = zeros(1, numel(idx_vel)); tmpv(1:min(3,numel(tmpv))) = 0;
+                S.R_L1_motor(i, idx_vel) = tmpv;
+                S.R_L1_motor(i, idx_bias) = 1;
                 
-                % Reset motor region representations
-                R_L1_motor(i, 1:3) = [x_player(i), y_player(i), z_player(i)];
-                R_L1_motor(i, 4:6) = [0, 0, 0];
-                R_L1_motor(i, 7) = 1;
-                
-                reach_direction = ([x_ball(i), y_ball(i), z_ball(i)] - [x_player(i), y_player(i), z_player(i)]) / ...
-                                   (norm([x_ball(i), y_ball(i), z_ball(i)] - [x_player(i), y_player(i), z_player(i)]) + 1e-6);
-                target_distance = norm([x_ball(i), y_ball(i), z_ball(i)] - [x_player(i), y_player(i), z_player(i)]);
+                reach_direction = ([S.x_ball(i), S.y_ball(i), S.z_ball(i)] - [S.x_player(i), S.y_player(i), S.z_player(i)]) / ...
+                                   (norm([S.x_ball(i), S.y_ball(i), S.z_ball(i)] - [S.x_player(i), S.y_player(i), S.z_player(i)]) + 1e-6);
+                target_distance = norm([S.x_ball(i), S.y_ball(i), S.z_ball(i)] - [S.x_player(i), S.y_player(i), S.z_player(i)]);
                 reaching_speed = reaching_speed_scale * target_distance;
                 
-                R_L2_motor(i, 1:3) = reach_direction * reaching_speed;
-                R_L2_motor(i, 4:6) = 0.01 * randn(1, 3);
-                R_L3_motor(i, 1:3) = reach_direction * reaching_speed;
+                S.R_L2_motor(i, 1:3) = reach_direction * reaching_speed;
+                S.R_L2_motor(i, 4:6) = 0.01 * randn(1, 3);
+                S.R_L3_motor(i, 1:3) = reach_direction * reaching_speed;
                 
-                % Reset planning region
-                R_L1_plan(i, 1:3) = [x_ball(i), y_ball(i), z_ball(i)];
-                R_L1_plan(i, 4:6) = [x_ball(i), y_ball(i), z_ball(i)];
-                R_L1_plan(i, 7) = 1;
-                
-                R_L2_plan(i, 1:3) = reach_direction * reaching_speed;
-                R_L2_plan(i, 4:6) = 0.01 * randn(1, 3);
-                R_L3_plan(i, 1:3) = reach_direction * reaching_speed;
+                % Reset planning region (write into S)
+                S.R_L1_plan(i, idx_pos) = [S.x_ball(i), S.y_ball(i), S.z_ball(i)];
+                tmpg = zeros(1, numel(idx_vel)); vals = [S.x_ball(i), S.y_ball(i), S.z_ball(i)];
+                ncopy = min(3, numel(tmpg)); tmpg(1:ncopy) = vals(1:ncopy);
+                S.R_L1_plan(i, idx_vel) = tmpg;
+                S.R_L1_plan(i, idx_bias) = 1;
+
+                S.R_L2_plan(i, 1:3) = reach_direction * reaching_speed;
+                S.R_L2_plan(i, 4:6) = 0.01 * randn(1, 3);
+                S.R_L3_plan(i, 1:3) = reach_direction * reaching_speed;
                 
                 % Apply phase transition decay - differential for motor vs. planning
-                W_motor_L2_to_L1 = decay_motor * W_motor_L2_to_L1;
-                W_motor_L3_to_L2 = decay_motor * W_motor_L3_to_L2;
-                
-                W_plan_L2_to_L1 = decay_plan * W_plan_L2_to_L1;
-                W_plan_L3_to_L2 = decay_plan * W_plan_L3_to_L2;
-                
-                % Restore critical motor mappings
-                W_motor_L2_to_L1(4:6, 1:3) = eye(3, 3);
-                
+                % Apply phase transition decay directly to S so helper sees updated weights
+                S.W_motor_L2_to_L1 = decay_motor * S.W_motor_L2_to_L1;
+                S.W_motor_L3_to_L2 = decay_motor * S.W_motor_L3_to_L2;
+
+                S.W_plan_L2_to_L1 = decay_plan * S.W_plan_L2_to_L1;
+                S.W_plan_L3_to_L2 = decay_plan * S.W_plan_L3_to_L2;
+
+                % Restore critical motor mappings (use semantic idx_vel for robustness)
+                map_vel_idx = idx_vel(1:min(3, numel(idx_vel)));
+                S.W_motor_L2_to_L1(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
+
                 current_trial = trial;
+                S.current_trial = current_trial; % ensure helper uses the updated trial index
                 
                 fprintf('\n[Trial %d started at step %d, Task Context: R_L0(i,%d)=1]\n', trial, i, trial);
                 fprintf('  Player reset to: [%.2f, %.2f, %.2f]\n', x_player(i), y_player(i), z_player(i));
@@ -510,67 +600,23 @@ for i = 1:N-1
         end
     end
     
-    % ============================================================== 
-    % UPDATE BALL TRAJECTORY (Continuous Motion)  -- REPLACED WITH BOUNCE PHYSICS
-    % ============================================================== 
-    time_in_trial = i - phases_indices{current_trial}(1);
-
-    % Smooth oscillating acceleration (internal drive)
-    acc_x = ball_trajectories{current_trial}.acceleration(1) * sin(time_in_trial * 0.001);
-    acc_y = ball_trajectories{current_trial}.acceleration(2) * sin(time_in_trial * 0.001 + 1);
-    acc_z = ball_trajectories{current_trial}.acceleration(3) * sin(time_in_trial * 0.001 + 2);
-
-    % Gravity acts downward on z
-    ax = acc_x;
-    ay = acc_y;
-    az = acc_z - gravity;
-
-    % Integrate velocity
-    vx_ball(i+1) = vx_ball(i) + ax * dt;
-    vy_ball(i+1) = vy_ball(i) + ay * dt;
-    vz_ball(i+1) = vz_ball(i) + az * dt;
-
-    % Air drag (simple fractional damping)
-    vx_ball(i+1) = vx_ball(i+1) * (1 - air_drag);
-    vy_ball(i+1) = vy_ball(i+1) * (1 - air_drag);
-    vz_ball(i+1) = vz_ball(i+1) * (1 - air_drag);
-
-    % Integrate position
-    x_ball(i+1) = x_ball(i) + dt * vx_ball(i+1);
-    y_ball(i+1) = y_ball(i) + dt * vy_ball(i+1);
-    z_ball(i+1) = z_ball(i) + dt * vz_ball(i+1);
-
-    % Collision with ground plane (workspace_bounds(3,1))
-    ground_z = workspace_bounds(3,1);
-    if z_ball(i+1) <= ground_z
-        % Place on ground
-        z_ball(i+1) = ground_z;
-
-        % Invert vertical velocity with restitution
-        if vz_ball(i+1) < 0
-            vz_ball(i+1) = -restitution * vz_ball(i+1);
-        end
-
-        % Apply ground friction to horizontal velocity
-        vx_ball(i+1) = vx_ball(i+1) * ground_friction;
-        vy_ball(i+1) = vy_ball(i+1) * ground_friction;
-
-        % Kill very small bounces to avoid jitter
-        if abs(vz_ball(i+1)) < 1e-3
-            vz_ball(i+1) = 0;
-        end
-    end
-
-    % Clamp to workspace
-    x_ball(i+1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), x_ball(i+1)));
-    y_ball(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), y_ball(i+1)));
-    z_ball(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), z_ball(i+1)));
+    % ==============================================================
+    % NOTE: Ball physics (integration + collisions) are now centralized
+    %       inside `hierarchical_step_update.m`. The helper operates on
+    %       S.* arrays and is the authoritative place for kinematics.
+    % ==============================================================
     
     % Delegate predictive coding + update work to the helper (type-stable, JIT-friendly)
     S = hierarchical_step_update(i, S, P);
 
     % Update current trial if helper changed it
     current_trial = S.current_trial;
+
+    % If the helper signaled session end (player close to ball), stop early
+    if isfield(S, 'session_end') && S.session_end
+        fprintf('\nSession terminated early at step %d (player within %.3fm of ball)\n', S.termination_step, P.termination_distance);
+        break;
+    end
 
     % Only print summary for the last step of the last trial when running under PSO
     if i == N-1 && exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false

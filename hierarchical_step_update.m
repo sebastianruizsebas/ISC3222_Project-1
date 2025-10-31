@@ -26,6 +26,11 @@ function S = hierarchical_step_update(i, S, P)
 dt = P.dt;
 workspace_bounds = P.workspace_bounds;
 
+% Semantic indices (allow main script to pass idx_pos/idx_vel/idx_bias via P)
+if isfield(P, 'idx_pos'), idx_pos = P.idx_pos; else idx_pos = 1:3; end
+if isfield(P, 'idx_vel'), idx_vel = P.idx_vel; else idx_vel = 4:6; end
+if isfield(P, 'idx_bias'), idx_bias = P.idx_bias; else idx_bias = 7; end
+
 % For convenience, operate directly on S fields (avoid unused local aliases)
 
 % ------------------------------
@@ -50,7 +55,12 @@ S.x_ball(i+1) = S.x_ball(i) + dt * S.vx_ball(i+1);
 S.y_ball(i+1) = S.y_ball(i) + dt * S.vy_ball(i+1);
 S.z_ball(i+1) = S.z_ball(i) + dt * S.vz_ball(i+1);
 
-ground_z = P.workspace_bounds(3,1);
+% Allow an explicit ground plane override (P.ground_z). Fall back to workspace lower bound.
+if isfield(P, 'ground_z')
+    ground_z = P.ground_z;
+else
+    ground_z = P.workspace_bounds(3,1);
+end
 if S.z_ball(i+1) <= ground_z
     S.z_ball(i+1) = ground_z;
     if S.vz_ball(i+1) < 0
@@ -67,6 +77,40 @@ S.x_ball(i+1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), S.x_ball(i
 S.y_ball(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), S.y_ball(i+1)));
 S.z_ball(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.z_ball(i+1)));
 
+% --- check ball pre-clamp bounds (debug / safety) ---
+% record the raw computed position (before clamp) if you want to inspect later
+raw_x = S.x_ball(i+1);
+raw_y = S.y_ball(i+1);
+raw_z = S.z_ball(i+1);
+
+% initialize log fields on first use (cheap)
+if ~isfield(S, 'ball_out_of_bounds_log')
+    S.ball_out_of_bounds_log = zeros(0,5); % columns: step, raw_x, raw_y, raw_z, reasonCode
+    S.ball_out_of_bounds = false;
+end
+
+% small tolerance to avoid floating point jitter reporting
+tol = 1e-9;
+x_min = workspace_bounds(1,1) - tol; x_max = workspace_bounds(1,2) + tol;
+y_min = workspace_bounds(2,1) - tol; y_max = workspace_bounds(2,2) + tol;
+z_min = workspace_bounds(3,1) - tol; z_max = workspace_bounds(3,2) + tol;
+
+out = (raw_x < x_min) || (raw_x > x_max) || (raw_y < y_min) || (raw_y > y_max) || (raw_z < z_min) || (raw_z > z_max);
+
+if out
+    S.ball_out_of_bounds = true;
+    % reasonCode: 1=x,2=y,3=z, sum if multiple
+    reasonCode = 0;
+    if raw_x < x_min || raw_x > x_max, reasonCode = reasonCode + 1; end
+    if raw_y < y_min || raw_y > y_max, reasonCode = reasonCode + 2; end
+    if raw_z < z_min || raw_z > z_max, reasonCode = reasonCode + 4; end
+    S.ball_out_of_bounds_log(end+1, :) = [i+1, raw_x, raw_y, raw_z, reasonCode];
+    % optional: clamp to bounds (if you keep your existing clamp, this is redundant)
+    S.x_ball(i+1) = min(max(raw_x, workspace_bounds(1,1)), workspace_bounds(1,2));
+    S.y_ball(i+1) = min(max(raw_y, workspace_bounds(2,1)), workspace_bounds(2,2));
+    S.z_ball(i+1) = min(max(raw_z, workspace_bounds(3,1)), workspace_bounds(3,2));
+end
+
 % ------------------------------
 % PREDICTION (Motor & Planning)
 % ------------------------------
@@ -78,10 +122,14 @@ S.pred_L2_motor(i,:) = S.pred_L2_motor(i,:) + S.R_L2_motor(i,:) * S.W_motor_L2_l
 S.pred_L1_motor(i,:) = S.R_L2_motor(i,:) * S.W_motor_L2_to_L1';
 S.pred_L1_motor(i,:) = S.pred_L1_motor(i,:) + S.R_L1_motor(i,:) * S.W_motor_L1_lat';
 
-pred_vx_motor = S.pred_L1_motor(i,4); pred_vy_motor = S.pred_L1_motor(i,5); pred_vz_motor = S.pred_L1_motor(i,6);
-S.motor_vx_motor(i) = P.motor_gain * pred_vx_motor;
-S.motor_vy_motor(i) = P.motor_gain * pred_vy_motor;
-S.motor_vz_motor(i) = P.motor_gain * pred_vz_motor;
+% extract velocity predictions using semantic indices (pad/truncate to 3 elements if needed)
+tmp_vel = S.pred_L1_motor(i, idx_vel);
+pred_vel_motor = zeros(1,3);
+n_tmp = numel(tmp_vel);
+pred_vel_motor(1:min(3,n_tmp)) = tmp_vel(1:min(3,n_tmp));
+S.motor_vx_motor(i) = P.motor_gain * pred_vel_motor(1);
+S.motor_vy_motor(i) = P.motor_gain * pred_vel_motor(2);
+S.motor_vz_motor(i) = P.motor_gain * pred_vel_motor(3);
 
 % Planning region predictions
 S.pred_L2_plan(i,:) = S.R_L3_plan(i,:) * S.W_plan_L3_to_L2';
@@ -90,10 +138,13 @@ S.pred_L2_plan(i,:) = S.pred_L2_plan(i,:) + S.R_L2_plan(i,:) * S.W_plan_L2_lat';
 S.pred_L1_plan(i,:) = S.R_L2_plan(i,:) * S.W_plan_L2_to_L1';
 S.pred_L1_plan(i,:) = S.pred_L1_plan(i,:) + S.R_L1_plan(i,:) * S.W_plan_L1_lat';
 
-pred_vx_plan = S.pred_L1_plan(i,4); pred_vy_plan = S.pred_L1_plan(i,5); pred_vz_plan = S.pred_L1_plan(i,6);
-S.motor_vx_plan(i) = P.motor_gain * pred_vx_plan;
-S.motor_vy_plan(i) = P.motor_gain * pred_vy_plan;
-S.motor_vz_plan(i) = P.motor_gain * pred_vz_plan;
+tmp_vel_p = S.pred_L1_plan(i, idx_vel);
+pred_vel_plan = zeros(1,3);
+n_tmp_p = numel(tmp_vel_p);
+pred_vel_plan(1:min(3,n_tmp_p)) = tmp_vel_p(1:min(3,n_tmp_p));
+S.motor_vx_plan(i) = P.motor_gain * pred_vel_plan(1);
+S.motor_vy_plan(i) = P.motor_gain * pred_vel_plan(2);
+S.motor_vz_plan(i) = P.motor_gain * pred_vel_plan(3);
 
 % ------------------------------
 % COMBINED OUTPUT & KINEMATICS
@@ -117,20 +168,30 @@ S.z_player(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.z_play
 % ------------------------------
 % ERROR COMPUTATION
 % ------------------------------
-S.E_L1_motor(i,1:3) = [S.x_player(i+1), S.y_player(i+1), S.z_player(i+1)] - S.pred_L1_motor(i,1:3);
-S.E_L1_motor(i,4:6) = [S.vx_player(i+1), S.vy_player(i+1), S.vz_player(i+1)] - S.pred_L1_motor(i,4:6);
-S.E_L1_motor(i,7) = 1 - S.pred_L1_motor(i,7);
+% use semantic indices for L1 (positions, velocities, bias)
+pos_vec = [S.x_player(i+1), S.y_player(i+1), S.z_player(i+1)];
+vel_vec = [S.vx_player(i+1), S.vy_player(i+1), S.vz_player(i+1)];
+S.E_L1_motor(i, idx_pos) = pos_vec(1:numel(idx_pos)) - S.pred_L1_motor(i, idx_pos);
+S.E_L1_motor(i, idx_vel) = vel_vec(1:numel(idx_vel)) - S.pred_L1_motor(i, idx_vel);
+S.E_L1_motor(i, idx_bias) = 1 - S.pred_L1_motor(i, idx_bias);
 
 S.E_L2_motor(i,:) = S.R_L2_motor(i,:) - S.pred_L2_motor(i,:);
 
-S.E_L1_plan(i,1:3) = [S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)] - S.pred_L1_plan(i,1:3);
-ball_pos_now = [S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)];
-S.E_L1_plan(i,4:6) = ball_pos_now - S.pred_L1_plan(i,4:6);
-S.E_L1_plan(i,7) = 1 - S.pred_L1_plan(i,7);
+pos_ball = [S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)];
+S.E_L1_plan(i, idx_pos) = pos_ball(1:numel(idx_pos)) - S.pred_L1_plan(i, idx_pos);
+S.E_L1_plan(i, idx_vel) = pos_ball(1:numel(idx_vel)) - S.pred_L1_plan(i, idx_vel);
+S.E_L1_plan(i, idx_bias) = 1 - S.pred_L1_plan(i, idx_bias);
 
 S.E_L2_plan(i,:) = S.R_L2_plan(i,:) - S.pred_L2_plan(i,:);
 
 S.interception_error_all(i) = sqrt((S.x_player(i+1) - S.x_ball(i+1))^2 + (S.y_player(i+1) - S.y_ball(i+1))^2 + (S.z_player(i+1) - S.z_ball(i+1))^2);
+
+% If player is sufficiently close to the ball, signal session end
+if isfield(P, 'termination_distance') && S.interception_error_all(i) <= P.termination_distance
+    S.session_end = true;
+    % store termination index as the next timestep (i+1) so calling code can reference final state
+    S.termination_step = i+1;
+end
 
 % ------------------------------
 % FREE ENERGY
@@ -144,13 +205,19 @@ S.free_energy_all(i) = sum(S.E_L1_motor(i,:).^2) / (2 * S.pi_L1_motor) + sum(S.E
 decay = 1 - P.momentum;
 
 % Motor L1
-S.R_L1_motor(i+1,1:3) = S.R_L1_motor(i,1:3) + decay * P.eta_rep * S.E_L1_motor(i,1:3) * 0.1;
-S.R_L1_motor(i+1,4:6) = P.momentum * S.R_L1_motor(i,4:6) + decay * P.eta_rep * S.E_L1_motor(i,4:6) * 0.1;
-S.R_L1_motor(i+1,4:6) = max(-2, min(2, S.R_L1_motor(i+1,4:6)));
-S.R_L1_motor(i+1,1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), S.R_L1_motor(i+1,1)));
-S.R_L1_motor(i+1,2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), S.R_L1_motor(i+1,2)));
-S.R_L1_motor(i+1,3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.R_L1_motor(i+1,3)));
-S.R_L1_motor(i+1,7) = 1;
+S.R_L1_motor(i+1, idx_pos) = S.R_L1_motor(i, idx_pos) + decay * P.eta_rep * S.E_L1_motor(i, idx_pos) * 0.1;
+S.R_L1_motor(i+1, idx_vel) = P.momentum * S.R_L1_motor(i, idx_vel) + decay * P.eta_rep * S.E_L1_motor(i, idx_vel) * 0.1;
+% clamp velocity channels elementwise
+for k = 1:numel(idx_vel)
+    S.R_L1_motor(i+1, idx_vel(k)) = max(-2, min(2, S.R_L1_motor(i+1, idx_vel(k))));
+end
+% clamp positional channels to workspace bounds (respect available dims)
+pos_dims = min(numel(idx_pos), size(workspace_bounds,1));
+for k = 1:pos_dims
+    S.R_L1_motor(i+1, idx_pos(k)) = max(workspace_bounds(k,1), min(workspace_bounds(k,2), S.R_L1_motor(i+1, idx_pos(k))));
+end
+% bias
+S.R_L1_motor(i+1, idx_bias) = 1;
 
 % Motor L2
 coupling_motor = S.E_L1_motor(i,:) * S.W_motor_L2_to_L1;
@@ -166,13 +233,16 @@ S.R_L3_motor(i+1,1:3) = S.R_L3_motor(i,1:3) + P.eta_rep * E_L3_motor * 0.1;
 S.R_L3_motor(i+1,1:3) = max(-1, min(1, S.R_L3_motor(i+1,1:3)));
 
 % Planning L1
-S.R_L1_plan(i+1,1:3) = S.R_L1_plan(i,1:3) + decay * P.eta_rep * S.E_L1_plan(i,1:3) * 0.1;
-S.R_L1_plan(i+1,4:6) = S.R_L1_plan(i,4:6) + decay * P.eta_rep * S.E_L1_plan(i,4:6) * 0.1;
-S.R_L1_plan(i+1,4:6) = max(-2, min(2, S.R_L1_plan(i+1,4:6)));
-S.R_L1_plan(i+1,1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), S.R_L1_plan(i+1,1)));
-S.R_L1_plan(i+1,2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), S.R_L1_plan(i+1,2)));
-S.R_L1_plan(i+1,3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.R_L1_plan(i+1,3)));
-S.R_L1_plan(i+1,7) = 1;
+S.R_L1_plan(i+1, idx_pos) = S.R_L1_plan(i, idx_pos) + decay * P.eta_rep * S.E_L1_plan(i, idx_pos) * 0.1;
+S.R_L1_plan(i+1, idx_vel) = S.R_L1_plan(i, idx_vel) + decay * P.eta_rep * S.E_L1_plan(i, idx_vel) * 0.1;
+for k = 1:numel(idx_vel)
+    S.R_L1_plan(i+1, idx_vel(k)) = max(-2, min(2, S.R_L1_plan(i+1, idx_vel(k))));
+end
+pos_dims_p = min(numel(idx_pos), size(workspace_bounds,1));
+for k = 1:pos_dims_p
+    S.R_L1_plan(i+1, idx_pos(k)) = max(workspace_bounds(k,1), min(workspace_bounds(k,2), S.R_L1_plan(i+1, idx_pos(k))));
+end
+S.R_L1_plan(i+1, idx_bias) = 1;
 
 % Planning L2 (task gated)
 task_gate = S.R_L0(i, S.current_trial) * 0.7 + 0.3;

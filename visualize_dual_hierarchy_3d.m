@@ -13,7 +13,7 @@ fprintf('║  DUAL-HIERARCHY VISUALIZATION: PLAYER CHASING BALL         ║\n');
 fprintf('║  Motor Region (Stable) + Planning Region (Task-Specific)  ║\n');
 fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
 
-results_file = './figures/3D_dual_hierarchy_results.mat';
+results_file = './tools/figures/3D_dual_hierarchy_results.mat';
 if ~isfile(results_file)
     error('Results file not found: %s\nRun hierarchical_motion_inference_dual_hierarchy() first.', results_file);
 end
