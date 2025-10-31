@@ -20,222 +20,12 @@ function results = hierarchical_motion_inference_dual_hierarchy(params, make_plo
     % Default: make plots unless explicitly disabled
     if nargin < 2
         make_plots = true;
+
+    % Suppress verbose initialization and parameter printouts when running under PSO (parallel optimization)
+    if ~exist('dh_params','var') || ~isfield(dh_params,'suppress_init_log') || ~dh_params.suppress_init_log
+        % ...existing code for printing initialization and parameters...
+        % (If you want to see these logs, set dh_params.suppress_init_log = false)
     end
-    
-    if nargin > 0 && isstruct(params)
-        % Override defaults with provided parameters
-        if isfield(params, 'eta_rep'), eta_rep = params.eta_rep; end
-        if isfield(params, 'eta_W'), eta_W = params.eta_W; end
-        if isfield(params, 'momentum'), momentum = params.momentum; end
-        if isfield(params, 'weight_decay'), weight_decay = params.weight_decay; end
-        if isfield(params, 'motor_gain'), motor_gain = params.motor_gain; end
-        if isfield(params, 'damping'), damping = params.damping; end
-        if isfield(params, 'reaching_speed_scale'), reaching_speed_scale = params.reaching_speed_scale; end
-        if isfield(params, 'decay_motor'), decay_motor = params.decay_motor; end
-        if isfield(params, 'decay_plan'), decay_plan = params.decay_plan; end
-        if isfield(params, 'W_plan_gain'), W_plan_gain = params.W_plan_gain; end
-        if isfield(params, 'W_motor_gain'), W_motor_gain = params.W_motor_gain; end
-        optimizer_mode = true;
-    else
-        optimizer_mode = false;
-    end
-
-    % --- Physics parameters (can be provided via params) ---
-    if nargin > 0 && isstruct(params)
-        if isfield(params, 'gravity'), gravity = params.gravity; end
-        if isfield(params, 'restitution'), restitution = params.restitution; end
-        if isfield(params, 'ground_friction'), ground_friction = params.ground_friction; end
-        if isfield(params, 'air_drag'), air_drag = params.air_drag; end
-    end
-
-    % Default physics params (if not provided)
-    if ~exist('gravity', 'var'), gravity = 9.81; end            % m/s^2 downward
-    if ~exist('restitution', 'var'), restitution = 0.75; end    % 0..1 bounce energy retained
-    if ~exist('ground_friction', 'var'), ground_friction = 0.90; end % 0..1 lateral speed retained on bounce
-    if ~exist('air_drag', 'var'), air_drag = 0.001; end         % small fractional velocity loss per step
-
-fprintf('╔═════════════════════════════════════════════════════════════╗\n');
-fprintf('║  DUAL-HIERARCHY PREDICTIVE CODING: PLAYER CHASING BALL    ║\n');
-fprintf('║  Motor Region (Stable) + Planning Region (Task-Specific)  ║\n');
-fprintf('╚═════════════════════════════════════════════════════════════╝\n\n');
-
-% ====================================================================
-% BATCH MODE SETUP
-% ====================================================================
-if ~exist('optimizer_mode', 'var')
-    optimizer_mode = false;
-end
-
-set(0, 'DefaultFigureVisible', 'off');
-set(groot, 'defaultFigureCreateFcn', @(fig, ~) set(fig, 'Visible', 'off'));
-
-if ~optimizer_mode
-    fprintf('Batch mode: Graphics output disabled, figures will be saved to disk.\n\n');
-end
-
-% ====================================================================
-% TASK CONFIGURATION: PLAYER CHASING MOVING BALL
-% ====================================================================
-
-dt = 0.01;              % Time step (s)
-T_per_trial = 4000;      % Duration per trial (s)
-n_trials = 4;           % Number of different ball trajectories
-
-% Allow overriding of timing parameters via params for faster debug runs or PSO
-if nargin > 0 && isstruct(params)
-    if isfield(params, 'dt'), dt = params.dt; end
-    if isfield(params, 'T_per_trial'), T_per_trial = params.T_per_trial; end
-    if isfield(params, 'n_trials'), n_trials = params.n_trials; end
-end
-
-T = T_per_trial * n_trials;  % Total duration
-t = 0:dt:T;
-N = length(t);
-
-% Define reaching task phases
-trial_duration_steps = round(T_per_trial / dt);  % ~250 steps per trial
-
-% Construct trial phase indices (start:end step indices for each trial)
-% phases_indices is used throughout the main loop to detect trial transitions
-phases_indices = cell(n_trials, 1);
-for trial = 1:n_trials
-    start_idx = (trial - 1) * trial_duration_steps + 1;
-    end_idx = min(trial * trial_duration_steps, N);
-    phases_indices{trial} = start_idx:end_idx;
-end
-
-% Define ball trajectory parameters for each trial
-% Each trial has a different ball trajectory (start_pos, velocity, acceleration)
-rng(42);  % For reproducibility
-ball_trajectories = {};
-for trial = 1:n_trials
-    ball_trajectories{trial} = struct(...
-        'start_pos', randn(1, 3) * 0.5, ...  % Random starting position
-        'velocity', randn(1, 3) * 0.5, ...   % Random initial velocity
-        'acceleration', randn(1, 3) * 0.1 ... % Random acceleration pattern
-    );
-end
-
-% Workspace bounds
-workspace_bounds = [
-    -2, 2;      % X bounds
-    -2, 2;      % Y bounds
-    -1, 2       % Z bounds
-];
-
-% Initial player positions for each trial (random inside workspace)
-initial_positions = zeros(n_trials, 3);
-for trial = 1:n_trials
-    for dim = 1:3
-        initial_positions(trial, dim) = workspace_bounds(dim, 1) + ...
-            rand() * (workspace_bounds(dim, 2) - workspace_bounds(dim, 1));
-    end
-end
-    
-% ====================================================================
-% LAYER DIMENSIONS - DUAL HIERARCHY
-% ====================================================================
-
-% Task Context Layer (L0)
-n_L0 = n_trials;        % One-hot encoding: which trial/task is active
-
-% Motor Region
-n_L1_motor = 7;         % [x, y, z, vx, vy, vz, bias] - proprioceptive state
-n_L2_motor = 6;         % Learned motor primitives (stable velocity commands)
-n_L3_motor = 3;         % Motor output (3D velocity commands to muscles)
-
-% Planning Region
-n_L1_plan = 7;          % [ball_x, ball_y, ball_z, goal_x, goal_y, goal_z, bias]
-n_L2_plan = 6;          % Learned planning/interception policies
-n_L3_plan = 3;          % Planning output (target velocity from planning region)
-
-fprintf('DUAL-HIERARCHY ARCHITECTURE:\n');
-fprintf('═════════════════════════════════════════════════════════════\n');
-fprintf('TASK CONTEXT (L0): %d neurons [one-hot trial encoding]\n', n_L0);
-fprintf('  • Explicit task identity for trial-specific learning\n');
-fprintf('  • Gates learning in motor vs. planning regions\n\n');
-
-fprintf('MOTOR REGION (Learns Stable Dynamics):\n');
-fprintf('  L1_motor (Proprioception): %d neurons [x, y, z, vx, vy, vz, bias]\n', n_L1_motor);
-fprintf('    → Stable proprioceptive state (decoupled from target motion)\n');
-fprintf('  L2_motor (Basis):           %d neurons [learned motor primitives]\n', n_L2_motor);
-fprintf('    → Goal-independent motion primitives\n');
-fprintf('  L3_motor (Output):          %d neurons [3D velocity commands]\n', n_L3_motor);
-fprintf('    → Direct motor commands to execution system\n');
-fprintf('  Weight Decay: 95%%-98%% (preserve motor knowledge across tasks)\n\n');
-
-fprintf('PLANNING REGION (Learns Task-Specific Strategies):\n');
-fprintf('  L1_plan (Goal State):       %d neurons [ball_x, ball_y, ball_z, goal_x, goal_y, goal_z, bias]\n', n_L1_plan);
-fprintf('    → Current ball position + desired interception goal\n');
-fprintf('  L2_plan (Policies):         %d neurons [learned interception policies]\n', n_L2_plan);
-fprintf('    → Task-specific reaching strategies\n');
-fprintf('  L3_plan (Output):           %d neurons [target velocity from planning]\n', n_L3_plan);
-fprintf('    → Planned velocity to send to motor region\n');
-fprintf('  Weight Decay: 70%%-80%% (forget old targets, learn new tasks)\n\n');
-
-fprintf('LEARNING GATING:\n');
-fprintf('  Motor region: Always learning (goal-independent motor laws)\n');
-fprintf('  Planning region: Task-gated learning (gate = 0.3-1.0 based on task context)\n\n');
-
-% ====================================================================
-% 3D KINEMATICS: INTEGRATING MOTOR COMMANDS INTO POSITION
-% ====================================================================
-
-% Initialize 3D position and velocity
-x_player = zeros(1, N);
-y_player = zeros(1, N);
-z_player = zeros(1, N);
-vx_player = zeros(1, N);
-vy_player = zeros(1, N);
-vz_player = zeros(1, N);
-
-% Ball trajectories
-x_ball = zeros(1, N);
-y_ball = zeros(1, N);
-z_ball = zeros(1, N);
-vx_ball = zeros(1, N);
-vy_ball = zeros(1, N);
-vz_ball = zeros(1, N);
-
-% Motor commands from each region
-motor_vx_motor = zeros(1, N);  % Velocity from motor region
-motor_vy_motor = zeros(1, N);
-motor_vz_motor = zeros(1, N);
-
-motor_vx_plan = zeros(1, N);   % Velocity from planning region
-motor_vy_plan = zeros(1, N);
-motor_vz_plan = zeros(1, N);
-
-% Motor dynamics parameters
-if ~exist('motor_gain', 'var')
-    motor_gain = 0.5;
-end
-if ~exist('damping', 'var')
-    damping = 0.85;
-end
-if ~exist('reaching_speed_scale', 'var')
-    reaching_speed_scale = 0.5;
-end
-
-fprintf('3D MOTOR DYNAMICS:\n');
-fprintf('  Motor gain: %.2f (scaling of commands to actual motion)\n', motor_gain);
-fprintf('  Damping: %.2f (velocity decay per timestep)\n', damping);
-fprintf('  Reaching speed scale: %.2f (target-distance-dependent)\n\n', reaching_speed_scale);
-
-% ====================================================================
-% LEARNING PARAMETERS
-% ====================================================================
-
-if ~exist('eta_rep', 'var')
-    eta_rep = 0.005;
-end
-if ~exist('eta_W', 'var')
-    eta_W = 0.0005;
-end
-if ~exist('momentum', 'var')
-    momentum = 0.98;
-end
-if ~exist('weight_decay', 'var')
     weight_decay = 0.98;
 end
 
@@ -660,10 +450,25 @@ for i = 1:N-1
     % Update current trial if helper changed it
     current_trial = S.current_trial;
 
-    % Only print summary at the very last step
-    if i == N-1
-        fprintf('Motor π=[%.2f,%.2f] Plan π=[%.2f,%.2f] | Interception error=%.4f\n', ...
-            S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan, S.interception_error_all(i));
+    % Only print summary for the last step of the last trial when running under PSO
+    if i == N-1 && exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false
+        % Find last trial index
+        last_trial = n_trials;
+        last_trial_indices = phases_indices{last_trial};
+        last_step_idx = last_trial_indices(end);
+        fprintf('Parameters used (last step of last trial):\n');
+        fprintf('  eta_rep = %.6f\n', P.eta_rep);
+        fprintf('  eta_W = %.6f\n', P.eta_W);
+        fprintf('  momentum = %.6f\n', P.momentum);
+        fprintf('  weight_decay = %.6f\n', P.weight_decay);
+        fprintf('  decay_motor = %.6f\n', P.decay_motor);
+        fprintf('  decay_plan = %.6f\n', P.decay_plan);
+        fprintf('  motor_gain = %.6f\n', P.motor_gain);
+        fprintf('  damping = %.6f\n', P.damping);
+        fprintf('  reaching_speed_scale = %.6f\n', P.reaching_speed_scale);
+        fprintf('  W_plan_gain = %.6f\n', P.W_plan_gain);
+        fprintf('  W_motor_gain = %.6f\n', P.W_motor_gain);
+        fprintf('Final interception error (step %d, trial %d): %.6f\n', last_step_idx, last_trial, S.interception_error_all(last_step_idx));
     end
     
 end  % End main loop
