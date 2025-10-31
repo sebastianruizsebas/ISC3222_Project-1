@@ -94,6 +94,7 @@ N = length(t);
 
 % Define reaching task phases
 trial_duration_steps = round(T_per_trial / dt);  % ~250 steps per trial
+phase_masks = {};
 
 % Construct trial phase indices (start:end step indices for each trial)
 % phases_indices is used throughout the main loop to detect trial transitions
@@ -455,74 +456,6 @@ fprintf('Total iterations: %d (dt=%.4fs per step, ~%.1f seconds estimated)\n', N
 
 current_trial = 1;
 
-%---------------------------------------------------------------------
-% Prepare S (state) and P (parameters) structs for step helper
-%---------------------------------------------------------------------
-S = struct();
-% runtime arrays
-S.x_player = x_player; S.y_player = y_player; S.z_player = z_player;
-S.vx_player = vx_player; S.vy_player = vy_player; S.vz_player = vz_player;
-S.x_ball = x_ball; S.y_ball = y_ball; S.z_ball = z_ball;
-S.vx_ball = vx_ball; S.vy_ball = vy_ball; S.vz_ball = vz_ball;
-S.motor_vx_motor = motor_vx_motor; S.motor_vy_motor = motor_vy_motor; S.motor_vz_motor = motor_vz_motor;
-S.motor_vx_plan = motor_vx_plan; S.motor_vy_plan = motor_vy_plan; S.motor_vz_plan = motor_vz_plan;
-
-% Representations
-S.R_L0 = R_L0;
-S.R_L1_motor = R_L1_motor; S.R_L2_motor = R_L2_motor; S.R_L3_motor = R_L3_motor;
-S.R_L1_plan = R_L1_plan; S.R_L2_plan = R_L2_plan; S.R_L3_plan = R_L3_plan;
-
-% Predictions and errors
-S.pred_L1_motor = pred_L1_motor; S.pred_L2_motor = pred_L2_motor;
-S.pred_L1_plan = pred_L1_plan; S.pred_L2_plan = pred_L2_plan;
-S.E_L1_motor = E_L1_motor; S.E_L2_motor = E_L2_motor;
-S.E_L1_plan = E_L1_plan; S.E_L2_plan = E_L2_plan;
-
-% Weight matrices
-S.W_motor_L2_to_L1 = W_motor_L2_to_L1; S.W_motor_L3_to_L2 = W_motor_L3_to_L2;
-S.W_plan_L2_to_L1 = W_plan_L2_to_L1; S.W_plan_L3_to_L2 = W_plan_L3_to_L2;
-S.W_motor_L1_lat = W_motor_L1_lat; S.W_motor_L2_lat = W_motor_L2_lat; S.W_motor_L3_lat = W_motor_L3_lat;
-S.W_plan_L1_lat = W_plan_L1_lat; S.W_plan_L2_lat = W_plan_L2_lat; S.W_plan_L3_lat = W_plan_L3_lat;
-
-% Learning traces
-S.free_energy_all = free_energy_all; S.interception_error_all = interception_error_all;
-S.learning_trace_W = learning_trace_W;
-
-% Precision traces and raw/denom traces
-S.pi_trace_L1_motor = pi_trace_L1_motor; S.pi_trace_L2_motor = pi_trace_L2_motor;
-S.pi_trace_L1_plan = pi_trace_L1_plan; S.pi_trace_L2_plan = pi_trace_L2_plan;
-S.pi_raw_trace_L1_motor = pi_raw_trace_L1_motor; S.pi_raw_trace_L2_motor = pi_raw_trace_L2_motor;
-S.pi_raw_trace_L1_plan = pi_raw_trace_L1_plan; S.pi_raw_trace_L2_plan = pi_raw_trace_L2_plan;
-S.denom_trace_L1_motor = denom_trace_L1_motor; S.denom_trace_L2_motor = denom_trace_L2_motor;
-S.denom_trace_L1_plan = denom_trace_L1_plan; S.denom_trace_L2_plan = denom_trace_L2_plan;
-
-% Dynamic precision state
-S.pi_L1_motor = pi_L1_motor; S.pi_L2_motor = pi_L2_motor; S.pi_L1_plan = pi_L1_plan; S.pi_L2_plan = pi_L2_plan;
-S.pi_L1_motor_base = pi_L1_motor_base; S.pi_L2_motor_base = pi_L2_motor_base;
-S.pi_L1_plan_base = pi_L1_plan_base; S.pi_L2_plan_base = pi_L2_plan_base;
-% L3 precisions (fixed small values)
-S.pi_L3_motor = pi_L3_motor; S.pi_L3_plan = pi_L3_plan;
-S.pi_L3_motor_base = pi_L3_motor; S.pi_L3_plan_base = pi_L3_plan;
-
-% Error histories
-S.L1_motor_error_history = L1_motor_error_history; S.L2_motor_error_history = L2_motor_error_history;
-S.L1_plan_error_history = L1_plan_error_history; S.L2_plan_error_history = L2_plan_error_history;
-
-% Misc
-S.current_trial = current_trial;
-S.phases_indices = phases_indices;
-S.ball_trajectories = ball_trajectories;
-
-%---------------------------------------------------------------------
-% Parameter struct (constants passed to step helper)
-%---------------------------------------------------------------------
-P = struct();
-P.dt = dt; P.gravity = gravity; P.restitution = restitution; P.ground_friction = ground_friction; P.air_drag = air_drag;
-P.workspace_bounds = workspace_bounds; P.motor_gain = motor_gain; P.damping = damping; P.reaching_speed_scale = reaching_speed_scale;
-P.eta_rep = eta_rep; P.eta_W = eta_W; P.momentum = momentum; P.weight_decay = weight_decay;
-P.decay_motor = decay_motor; P.decay_plan = decay_plan; P.W_plan_gain = W_plan_gain; P.W_motor_gain = W_motor_gain;
-P.pi_smooth_alpha = pi_smooth_alpha; P.pi_max_step_ratio = pi_max_step_ratio; P.window_size = window_size;
-
 for i = 1:N-1
     if mod(i, 100) == 0, fprintf('.'); end
     
@@ -654,42 +587,399 @@ for i = 1:N-1
     y_ball(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), y_ball(i+1)));
     z_ball(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), z_ball(i+1)));
     
-    % Delegate predictive coding + update work to the helper (type-stable, JIT-friendly)
-    S = hierarchical_step_update(i, S, P);
+    % ==============================================================
+    % MOTOR REGION PREDICTIVE CODING
+    % ==============================================================
 
-    % Update current trial if helper changed it
-    current_trial = S.current_trial;
+    % Top-down: L3_motor → L2_motor
+    pred_L2_motor(i,:) = R_L3_motor(i,:) * W_motor_L3_to_L2';
 
-    % Debug output (kept in main thread for clarity)
+    % Lateral: L2 lateral projection
+    pred_L2_motor(i,:) = pred_L2_motor(i,:) + R_L2_motor(i,:) * W_motor_L2_lat';
+
+    % Top-down: L2_motor → L1_motor
+    pred_L1_motor(i,:) = R_L2_motor(i,:) * W_motor_L2_to_L1';
+
+    % Lateral: L1 lateral projection
+    pred_L1_motor(i,:) = pred_L1_motor(i,:) + R_L1_motor(i,:) * W_motor_L1_lat';
+
+    % Extract predicted velocities
+    pred_vx_motor = pred_L1_motor(i, 4);
+    pred_vy_motor = pred_L1_motor(i, 5);
+    pred_vz_motor = pred_L1_motor(i, 6);
+
+    % Motor execution
+    motor_vx_motor(i) = motor_gain * pred_vx_motor;
+    motor_vy_motor(i) = motor_gain * pred_vy_motor;
+    motor_vz_motor(i) = motor_gain * pred_vz_motor;
+    
+    % ==============================================================
+    % PLANNING REGION PREDICTIVE CODING
+    % ==============================================================
+    
+    % Planning region: predict policies from planning goals
+    pred_L2_plan(i,:) = R_L3_plan(i,:) * W_plan_L3_to_L2';
+    
+    % Lateral: L2 planning lateral
+    pred_L2_plan(i,:) = pred_L2_plan(i,:) + R_L2_plan(i,:) * W_plan_L2_lat';
+    
+    % Plan predicts ball state
+    pred_L1_plan(i,:) = R_L2_plan(i,:) * W_plan_L2_to_L1';
+    
+    % Lateral: L1 planning lateral
+    pred_L1_plan(i,:) = pred_L1_plan(i,:) + R_L1_plan(i,:) * W_plan_L1_lat';
+
+    % Extract predicted velocities from planning
+    pred_vx_plan = pred_L1_plan(i, 4);
+    pred_vy_plan = pred_L1_plan(i, 5);
+    pred_vz_plan = pred_L1_plan(i, 6);
+    
+    motor_vx_plan(i) = motor_gain * pred_vx_plan;
+    motor_vy_plan(i) = motor_gain * pred_vy_plan;
+    motor_vz_plan(i) = motor_gain * pred_vz_plan;
+    
+    % ==============================================================
+    % COMBINED MOTOR OUTPUT & KINEMATICS
+    % ==============================================================
+    % Combine motor and planning outputs (equal weighting for now)
+    
+    combined_vx = 0.5 * motor_vx_motor(i) + 0.5 * motor_vx_plan(i);
+    combined_vy = 0.5 * motor_vy_motor(i) + 0.5 * motor_vy_plan(i);
+    combined_vz = 0.5 * motor_vz_motor(i) + 0.5 * motor_vz_plan(i);
+    
+    % Update player velocity
+    vx_player(i+1) = damping * vx_player(i) + combined_vx;
+    vy_player(i+1) = damping * vy_player(i) + combined_vy;
+    vz_player(i+1) = damping * vz_player(i) + combined_vz;
+    
+    % Update player position
+    x_player(i+1) = x_player(i) + dt * vx_player(i+1);
+    y_player(i+1) = y_player(i) + dt * vy_player(i+1);
+    z_player(i+1) = z_player(i) + dt * vz_player(i+1);
+    
+    % Clamp to workspace
+    x_player(i+1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), x_player(i+1)));
+    y_player(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), y_player(i+1)));
+    z_player(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), z_player(i+1)));
+    
+    % ==============================================================
+    % ERROR COMPUTATION - MOTOR REGION
+    % ==============================================================
+    
+    % Proprioceptive error
+    E_L1_motor(i, 1:3) = [x_player(i+1), y_player(i+1), z_player(i+1)] - pred_L1_motor(i, 1:3);
+    E_L1_motor(i, 4:6) = [vx_player(i+1), vy_player(i+1), vz_player(i+1)] - pred_L1_motor(i, 4:6);
+    E_L1_motor(i, 7) = 1 - pred_L1_motor(i, 7);
+    
+    % Motor basis error
+    E_L2_motor(i,:) = R_L2_motor(i,:) - pred_L2_motor(i,:);
+    
+    % ==============================================================
+    % ERROR COMPUTATION - PLANNING REGION
+    % ==============================================================
+    
+    % Ball position error
+    E_L1_plan(i, 1:3) = [x_ball(i+1), y_ball(i+1), z_ball(i+1)] - pred_L1_plan(i, 1:3);
+    
+    % Goal: try to intercept ball (goal = current ball position in simple version)
+    ball_pos_now = [x_ball(i+1), y_ball(i+1), z_ball(i+1)];
+    E_L1_plan(i, 4:6) = ball_pos_now - pred_L1_plan(i, 4:6);
+    
+    E_L1_plan(i, 7) = 1 - pred_L1_plan(i, 7);
+    
+    % Policy error
+    E_L2_plan(i,:) = R_L2_plan(i,:) - pred_L2_plan(i,:);
+    
+    % Interception error: distance from player to ball
+    interception_error_all(i) = sqrt((x_player(i+1) - x_ball(i+1))^2 + ...
+                                      (y_player(i+1) - y_ball(i+1))^2 + ...
+                                      (z_player(i+1) - z_ball(i+1))^2);
+    
+    % ==============================================================
+    % FREE ENERGY & METRICS
+    % ==============================================================
+    
+    fe_motor = sum(E_L1_motor(i,:).^2) / (2 * pi_L1_motor) + sum(E_L2_motor(i,:).^2) / (2 * pi_L2_motor);
+    fe_plan = sum(E_L1_plan(i,:).^2) / (2 * pi_L1_plan) + sum(E_L2_plan(i,:).^2) / (2 * pi_L2_plan);
+    fe_interception = (pi_L1_motor / 100) * interception_error_all(i)^2;
+    
+    free_energy_all(i) = fe_motor + fe_plan + fe_interception;
+    
+    % ==============================================================
+    % REPRESENTATION UPDATES (MOTOR REGION)
+    % ==============================================================
+    
+    decay = 1 - momentum;
+    
+    % L1_motor: proprioceptive learning
+    R_L1_motor(i+1, 1:3) = R_L1_motor(i, 1:3) + decay * eta_rep * E_L1_motor(i, 1:3) * 0.1;
+    R_L1_motor(i+1, 4:6) = momentum * R_L1_motor(i, 4:6) + decay * eta_rep * E_L1_motor(i, 4:6) * 0.1;
+    R_L1_motor(i+1, 4:6) = max(-2, min(2, R_L1_motor(i+1, 4:6)));
+    R_L1_motor(i+1, 1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), R_L1_motor(i+1,1)));
+    R_L1_motor(i+1, 2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), R_L1_motor(i+1,2)));
+    R_L1_motor(i+1, 3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), R_L1_motor(i+1,3)));
+    R_L1_motor(i+1, 7) = 1;
+    
+    % L2_motor: motor basis learning
+    coupling_motor = E_L1_motor(i,:) * W_motor_L2_to_L1;
+    norm_W_motor = max(0.1, norm(W_motor_L2_to_L1, 'fro'));
+    coupling_motor = coupling_motor / norm_W_motor;
+    
+    delta_R_L2_motor = coupling_motor - E_L2_motor(i,:);
+    R_L2_motor(i+1,:) = momentum * R_L2_motor(i,:) + decay * eta_rep * delta_R_L2_motor * 0.5;
+    R_L2_motor(i+1,:) = max(-1, min(1, R_L2_motor(i+1,:)));
+    
+    % L3_motor: output learning
+    E_L3_motor = mean(E_L2_motor(i,:)) * ones(1, 3);
+    R_L3_motor(i+1, 1:3) = R_L3_motor(i, 1:3) + eta_rep * E_L3_motor * 0.1;
+    R_L3_motor(i+1, 1:3) = max(-1, min(1, R_L3_motor(i+1, 1:3)));
+    
+    % ==============================================================
+    % REPRESENTATION UPDATES (PLANNING REGION)
+    % ==============================================================
+    
+    % L1_plan: goal state learning
+    R_L1_plan(i+1, 1:3) = R_L1_plan(i, 1:3) + decay * eta_rep * E_L1_plan(i, 1:3) * 0.1;
+    R_L1_plan(i+1, 4:6) = R_L1_plan(i, 4:6) + decay * eta_rep * E_L1_plan(i, 4:6) * 0.1;
+    R_L1_plan(i+1, 4:6) = max(-2, min(2, R_L1_plan(i+1, 4:6)));
+    R_L1_plan(i+1, 1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), R_L1_plan(i+1,1)));
+    R_L1_plan(i+1, 2) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), R_L1_plan(i+1,2)));
+    R_L1_plan(i+1, 3) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), R_L1_plan(i+1,3)));
+    R_L1_plan(i+1, 7) = 1;
+    
+    % L2_plan: policy learning (WITH TASK GATING)
+    % Task gate: full learning when this task is active (R_L0(i, current_trial) = 1)
+    task_gate = R_L0(i, current_trial) * 0.7 + 0.3;  % Range [0.3, 1.0]
+    
+    coupling_plan = E_L1_plan(i,:) * W_plan_L2_to_L1;
+    norm_W_plan = max(0.1, norm(W_plan_L2_to_L1, 'fro'));
+    coupling_plan = coupling_plan / norm_W_plan;
+    
+    delta_R_L2_plan = coupling_plan - E_L2_plan(i,:);
+    R_L2_plan(i+1,:) = momentum * R_L2_plan(i,:) + decay * eta_rep * delta_R_L2_plan * 0.5 * task_gate;
+    R_L2_plan(i+1,:) = max(-1, min(1, R_L2_plan(i+1,:)));
+    
+    % L3_plan: planning output learning
+    E_L3_plan = mean(E_L2_plan(i,:)) * ones(1, 3);
+    R_L3_plan(i+1, 1:3) = R_L3_plan(i, 1:3) + eta_rep * E_L3_plan * 0.1 * task_gate;
+    R_L3_plan(i+1, 1:3) = max(-1, min(1, R_L3_plan(i+1, 1:3)));
+    
+    % ==============================================================
+    % WEIGHT LEARNING WITH DYNAMIC PRECISION - MOTOR REGION
+    % ==============================================================
+    
+    layer_scale_motor_1 = max(0.1, mean(abs(R_L2_motor(i,:))));
+    layer_scale_motor_3 = max(0.1, mean(abs(R_L3_motor(i,:))));
+    
+    % Motor weights: always learning (motor region is always active)
+    dW_motor_1 = -(eta_W * pi_L1_motor / layer_scale_motor_1) * (E_L1_motor(i,:)' * R_L2_motor(i,:));
+    W_motor_L2_to_L1 = W_motor_L2_to_L1 + dW_motor_1;
+    
+    dW_motor_3 = -(eta_W * pi_L2_motor / layer_scale_motor_3) * (E_L2_motor(i,:)' * R_L3_motor(i,:));
+    W_motor_L3_to_L2 = W_motor_L3_to_L2 + dW_motor_3;
+    
+    % --- NEW: lateral weight updates (motor) ---
+    dW_motor_L1_lat = -(eta_W * pi_L1_motor / max(0.1, mean(abs(R_L1_motor(i,:))))) * (E_L1_motor(i,:)' * R_L1_motor(i,:));
+    dW_motor_L2_lat = -(eta_W * pi_L2_motor / max(0.1, mean(abs(R_L2_motor(i,:))))) * (E_L2_motor(i,:)' * R_L2_motor(i,:));
+    dW_motor_L3_lat = -(eta_W * pi_L3_motor / max(0.1, mean(abs(R_L3_motor(i,:))))) * (mean(E_L2_motor(i,:))' * R_L3_motor(i,:));
+    
+    W_motor_L1_lat = W_motor_L1_lat + dW_motor_L1_lat;
+    W_motor_L2_lat = W_motor_L2_lat + dW_motor_L2_lat;
+    W_motor_L3_lat = W_motor_L3_lat + dW_motor_L3_lat;
+    
+    % Regularize lateral weights lightly and zero self-connections
+    W_motor_L1_lat = W_motor_L1_lat * 0.9999; W_motor_L1_lat(1:n_L1_motor+1:end) = 0;
+    W_motor_L2_lat = W_motor_L2_lat * 0.9999; W_motor_L2_lat(1:n_L2_motor+1:end) = 0;
+    W_motor_L3_lat = W_motor_L3_lat * 0.9999; W_motor_L3_lat(1:n_L3_motor+1:end) = 0;
+
+    % ============================================================== 
+    % WEIGHT LEARNING WITH DYNAMIC PRECISION - PLANNING REGION
+    % ==============================================================
+    % Planning weights: task-gated learning
+    % Ensure layer-scale normalization variables exist (analogous to motor region)
+    layer_scale_plan_1 = max(0.1, mean(abs(R_L2_plan(i,:))));
+    layer_scale_plan_3 = max(0.1, mean(abs(R_L3_plan(i,:))));
+
+    dW_plan_1 = -(eta_W * pi_L1_plan / layer_scale_plan_1) * (E_L1_plan(i,:)' * R_L2_plan(i,:)) * task_gate;
+    W_plan_L2_to_L1 = W_plan_L2_to_L1 + dW_plan_1;
+
+    dW_plan_3 = -(eta_W * pi_L2_plan / layer_scale_plan_3) * (E_L2_plan(i,:)' * R_L3_plan(i,:)) * task_gate;
+    W_plan_L3_to_L2 = W_plan_L3_to_L2 + dW_plan_3;
+
+    % --- NEW: lateral weight updates (planning, task-gated) ---
+    dW_plan_L1_lat = -(eta_W * pi_L1_plan / max(0.1, mean(abs(R_L1_plan(i,:))))) * (E_L1_plan(i,:)' * R_L1_plan(i,:)) * task_gate;
+    dW_plan_L2_lat = -(eta_W * pi_L2_plan / max(0.1, mean(abs(R_L2_plan(i,:))))) * (E_L2_plan(i,:)' * R_L2_plan(i,:)) * task_gate;
+    dW_plan_L3_lat = -(eta_W * pi_L3_plan / max(0.1, mean(abs(R_L3_plan(i,:))))) * (mean(E_L2_plan(i,:))' * R_L3_plan(i,:)) * task_gate;
+
+    W_plan_L1_lat = W_plan_L1_lat + dW_plan_L1_lat;
+    W_plan_L2_lat = W_plan_L2_lat + dW_plan_L2_lat;
+    W_plan_L3_lat = W_plan_L3_lat + dW_plan_L3_lat;
+
+    % Regularize lateral planning weights and zero self-connections
+    W_plan_L1_lat = W_plan_L1_lat * 0.9999; W_plan_L1_lat(1:n_L1_plan+1:end) = 0;
+    W_plan_L2_lat = W_plan_L2_lat * 0.9999; W_plan_L2_lat(1:n_L2_plan+1:end) = 0;
+    W_plan_L3_lat = W_plan_L3_lat * 0.9999; W_plan_L3_lat(1:n_L3_plan+1:end) = 0;
+
+    learning_trace_W(i) = norm(dW_motor_1, 'fro') + norm(dW_motor_3, 'fro') + ...
+                          norm(dW_plan_1, 'fro') + norm(dW_plan_3, 'fro') + ...
+                          norm(dW_motor_L1_lat,'fro') + norm(dW_motor_L2_lat,'fro') + norm(dW_motor_L3_lat,'fro') + ...
+                          norm(dW_plan_L1_lat,'fro') + norm(dW_plan_L2_lat,'fro') + norm(dW_plan_L3_lat,'fro');
+    
+    % ==============================================================
+    % DYNAMIC PRECISION UPDATES
+    % ==============================================================
+    
+    L1_motor_error_mag = sqrt(sum(E_L1_motor(i,:).^2));
+    L2_motor_error_mag = sqrt(sum(E_L2_motor(i,:).^2));
+    L1_plan_error_mag = sqrt(sum(E_L1_plan(i,:).^2));
+    L2_plan_error_mag = sqrt(sum(E_L2_plan(i,:).^2));
+    
+    L1_motor_error_history = [L1_motor_error_history, L1_motor_error_mag];
+    L2_motor_error_history = [L2_motor_error_history, L2_motor_error_mag];
+    L1_plan_error_history = [L1_plan_error_history, L1_plan_error_mag];
+    L2_plan_error_history = [L2_plan_error_history, L2_plan_error_mag];
+    
+    if length(L1_motor_error_history) > window_size
+        L1_motor_error_history = L1_motor_error_history(end-window_size+1:end);
+        L2_motor_error_history = L2_motor_error_history(end-window_size+1:end);
+        L1_plan_error_history = L1_plan_error_history(end-window_size+1:end);
+        L2_plan_error_history = L2_plan_error_history(end-window_size+1:end);
+    end
+    
+    % Update dynamic precisions (robust, smoothed, capped)
+    % Use robust normalization to avoid numerical explosion from variance/division
+    % Normalize variance to [0,1] using a small floor to avoid /0
+    epsilon_var = 1e-6;
+
+    % Helper anonymous to compute smoothed, step-limited precision (not used — updates written inline)
+
+    % L1 motor
+    if length(L1_motor_error_history) > 10
+        err_val = L1_motor_error_history(end);
+        var_val = var(L1_motor_error_history);
+        var_norm = var_val / (var_val + epsilon_var);
+        denom = 1 + 0.8 * err_val + 0.2 * var_norm;                  % bounded denominator
+        if ~isfinite(denom) || denom <= 0, denom = 1; end
+
+        % Compute raw precision relative to base and clamp raw to a reasonable range
+        raw_pi = pi_L1_motor_base / denom;
+        raw_pi = max(pi_L1_motor_base * 0.01, min(pi_L1_motor_base * 10, raw_pi));
+
+        % Smooth and limit per-step multiplicative change
+        pi_candidate = pi_smooth_alpha * pi_L1_motor + (1 - pi_smooth_alpha) * raw_pi;
+        if pi_L1_motor > 0
+            ratio = pi_candidate / pi_L1_motor;
+            if ratio > pi_max_step_ratio, pi_candidate = pi_L1_motor * pi_max_step_ratio; end
+            if ratio < 1/pi_max_step_ratio, pi_candidate = pi_L1_motor / pi_max_step_ratio; end
+        end
+
+        % Final clamp
+        pi_L1_motor = max(1, min(1000, pi_candidate));
+
+        % Diagnostics
+        pi_trace_L1_motor(i) = pi_L1_motor;
+        pi_raw_trace_L1_motor(i) = raw_pi;
+        denom_trace_L1_motor(i) = denom;
+    else
+        pi_trace_L1_motor(i) = pi_L1_motor;
+        pi_raw_trace_L1_motor(i) = pi_L1_motor;
+        denom_trace_L1_motor(i) = 1;
+    end
+
+    % L2 motor
+    if length(L2_motor_error_history) > 10
+        err_val = L2_motor_error_history(end);
+        var_val = var(L2_motor_error_history);
+        var_norm = var_val / (var_val + epsilon_var);
+        denom = 1 + 0.8 * err_val + 0.2 * var_norm;
+        if ~isfinite(denom) || denom <= 0, denom = 1; end
+
+        raw_pi = pi_L2_motor_base / denom;
+        raw_pi = max(pi_L2_motor_base * 0.01, min(pi_L2_motor_base * 10, raw_pi));
+
+        pi_candidate = pi_smooth_alpha * pi_L2_motor + (1 - pi_smooth_alpha) * raw_pi;
+        if pi_L2_motor > 0
+            ratio = pi_candidate / pi_L2_motor;
+            if ratio > pi_max_step_ratio, pi_candidate = pi_L2_motor * pi_max_step_ratio; end
+            if ratio < 1/pi_max_step_ratio, pi_candidate = pi_L2_motor / pi_max_step_ratio; end
+        end
+
+        pi_L2_motor = max(0.1, min(100, pi_candidate));
+
+        pi_trace_L2_motor(i) = pi_L2_motor;
+        pi_raw_trace_L2_motor(i) = raw_pi;
+        denom_trace_L2_motor(i) = denom;
+    else
+        pi_trace_L2_motor(i) = pi_L2_motor;
+        pi_raw_trace_L2_motor(i) = pi_L2_motor;
+        denom_trace_L2_motor(i) = 1;
+    end
+
+    % L1 planning
+    if length(L1_plan_error_history) > 10
+        err_val = L1_plan_error_history(end);
+        var_val = var(L1_plan_error_history);
+        var_norm = var_val / (var_val + epsilon_var);
+        denom = 1 + 0.8 * err_val + 0.2 * var_norm;
+        if ~isfinite(denom) || denom <= 0, denom = 1; end
+
+        raw_pi = pi_L1_plan_base / denom;
+        raw_pi = max(pi_L1_plan_base * 0.01, min(pi_L1_plan_base * 10, raw_pi));
+
+        pi_candidate = pi_smooth_alpha * pi_L1_plan + (1 - pi_smooth_alpha) * raw_pi;
+        if pi_L1_plan > 0
+            ratio = pi_candidate / pi_L1_plan;
+            if ratio > pi_max_step_ratio, pi_candidate = pi_L1_plan * pi_max_step_ratio; end
+            if ratio < 1/pi_max_step_ratio, pi_candidate = pi_L1_plan / pi_max_step_ratio; end
+        end
+
+        pi_L1_plan = max(1, min(1000, pi_candidate));
+
+        pi_trace_L1_plan(i) = pi_L1_plan;
+        pi_raw_trace_L1_plan(i) = raw_pi;
+        denom_trace_L1_plan(i) = denom;
+    else
+        pi_trace_L1_plan(i) = pi_L1_plan;
+        pi_raw_trace_L1_plan(i) = pi_L1_plan;
+        denom_trace_L1_plan(i) = 1;
+    end
+
+    % L2 planning
+    if length(L2_plan_error_history) > 10
+        err_val = L2_plan_error_history(end);
+        var_val = var(L2_plan_error_history);
+        var_norm = var_val / (var_val + epsilon_var);
+        denom = 1 + 0.8 * err_val + 0.2 * var_norm;
+        if ~isfinite(denom) || denom <= 0, denom = 1; end
+
+        raw_pi = pi_L2_plan_base / denom;
+        raw_pi = max(pi_L2_plan_base * 0.01, min(pi_L2_plan_base * 10, raw_pi));
+
+        pi_candidate = pi_smooth_alpha * pi_L2_plan + (1 - pi_smooth_alpha) * raw_pi;
+        if pi_L2_plan > 0
+            ratio = pi_candidate / pi_L2_plan;
+            if ratio > pi_max_step_ratio, pi_candidate = pi_L2_plan * pi_max_step_ratio; end
+            if ratio < 1/pi_max_step_ratio, pi_candidate = pi_L2_plan / pi_max_step_ratio; end
+        end
+
+        pi_L2_plan = max(0.1, min(100, pi_candidate));
+
+        pi_trace_L2_plan(i) = pi_L2_plan;
+        pi_raw_trace_L2_plan(i) = raw_pi;
+        denom_trace_L2_plan(i) = denom;
+    else
+        pi_trace_L2_plan(i) = pi_L2_plan;
+        pi_raw_trace_L2_plan(i) = pi_L2_plan;
+        denom_trace_L2_plan(i) = 1;
+    end
+    
+    % Debug output
     if mod(i, 1000) == 0 && i > 1000
         fprintf('  Step %d: Motor π=[%.2f,%.2f] Plan π=[%.2f,%.2f] | Interception error=%.4f\n', ...
-            i, S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan, S.interception_error_all(i));
+            i, pi_L1_motor, pi_L2_motor, pi_L1_plan, pi_L2_plan, interception_error_all(i));
     end
     
 end  % End main loop
-
-% Pull arrays/state back from S for saving and plotting
-x_player = S.x_player; y_player = S.y_player; z_player = S.z_player;
-vx_player = S.vx_player; vy_player = S.vy_player; vz_player = S.vz_player;
-x_ball = S.x_ball; y_ball = S.y_ball; z_ball = S.z_ball;
-vx_ball = S.vx_ball; vy_ball = S.vy_ball; vz_ball = S.vz_ball;
-R_L0 = S.R_L0;
-R_L1_motor = S.R_L1_motor; R_L2_motor = S.R_L2_motor; R_L3_motor = S.R_L3_motor;
-R_L1_plan = S.R_L1_plan; R_L2_plan = S.R_L2_plan; R_L3_plan = S.R_L3_plan;
-interception_error_all = S.interception_error_all;
-free_energy_all = S.free_energy_all;
-phases_indices = S.phases_indices;
-W_motor_L2_to_L1 = S.W_motor_L2_to_L1; W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
-W_plan_L2_to_L1 = S.W_plan_L2_to_L1; W_plan_L3_to_L2 = S.W_plan_L3_to_L2;
-W_motor_L1_lat = S.W_motor_L1_lat; W_motor_L2_lat = S.W_motor_L2_lat; W_motor_L3_lat = S.W_motor_L3_lat;
-W_plan_L1_lat = S.W_plan_L1_lat; W_plan_L2_lat = S.W_plan_L2_lat; W_plan_L3_lat = S.W_plan_L3_lat;
-learning_trace_W = S.learning_trace_W;
-pi_trace_L1_motor = S.pi_trace_L1_motor; pi_trace_L2_motor = S.pi_trace_L2_motor;
-pi_trace_L1_plan = S.pi_trace_L1_plan; pi_trace_L2_plan = S.pi_trace_L2_plan;
-pi_raw_trace_L1_motor = S.pi_raw_trace_L1_motor; pi_raw_trace_L2_motor = S.pi_raw_trace_L2_motor;
-pi_raw_trace_L1_plan = S.pi_raw_trace_L1_plan; pi_raw_trace_L2_plan = S.pi_raw_trace_L2_plan;
-denom_trace_L1_motor = S.denom_trace_L1_motor; denom_trace_L2_motor = S.denom_trace_L2_motor;
-denom_trace_L1_plan = S.denom_trace_L1_plan; denom_trace_L2_plan = S.denom_trace_L2_plan;
 
 fprintf('\n✓ Main loop complete (%d iterations executed)\n\n', N-1);
 

@@ -266,147 +266,116 @@ for iteration = 1:num_iterations
     
     iteration_scores = [];
     
-    % Evaluate each particle in the swarm
-    for p = 1:num_particles
-        fprintf('  Particle %d/%d: ', p, num_particles);
-        fprintf('η_rep=%.6f, η_W=%.6f, mom=%.4f, decay=[%.3f,%.3f], mg=%.3f, damp=%.3f, rss=%.3f, w=[%.3f,%.4f]\n', ...
-            particles(p).eta_rep, particles(p).eta_W, particles(p).momentum, ...
-            particles(p).decay_L2_goal, particles(p).decay_L1_motor, ...
-            particles(p).motor_gain, particles(p).damping, particles(p).reaching_speed_scale, ...
-            particles(p).W_L2_goal_gain, particles(p).W_L1_pos_gain);
-        
-        % Create parameter struct for this particle (11 total parameters)
-        current_params = struct();
-        current_params.eta_rep = particles(p).eta_rep;
-        current_params.eta_W = particles(p).eta_W;
-        current_params.momentum = particles(p).momentum;
-        current_params.decay_L2_goal = particles(p).decay_L2_goal;
-        current_params.decay_L1_motor = particles(p).decay_L1_motor;
-        current_params.motor_gain = particles(p).motor_gain;
-        current_params.damping = particles(p).damping;
-        current_params.reaching_speed_scale = particles(p).reaching_speed_scale;
-        current_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
-        current_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
-        
-        % --- RUN THE 3D MODEL WITH THESE PARAMETERS ---
+    % Evaluate each particle in the swarm (parallelized)
+    % We evaluate particles in parallel using parfor. Each worker returns
+    % a small result struct and a numeric score. We avoid writing files in
+    % the worker (dh_params.save_results=false) to prevent I/O contention.
+
+    % Prepare output containers
+    scores = inf(1, num_particles);
+    loaded_data_cell = cell(1, num_particles);
+    personal_best_scores = [particles.best_score];
+    personal_best_params_cell = cell(1, num_particles);
+
+    % Start parallel pool if needed
+    if isempty(gcp('nocreate'))
         try
-            % Turn off graphics
-            old_visible = get(0, 'DefaultFigureVisible');
-            set(0, 'DefaultFigureVisible', 'off');
-
-            % Run the dual-hierarchy model with parameters and NO plotting (for speed)
-            % Call signature: results = hierarchical_motion_inference_dual_hierarchy(params, make_plots)
-            % Map PSO parameter names to the dual-hierarchy expected names
-            dh_params = struct();
-            dh_params.eta_rep = current_params.eta_rep;
-            dh_params.eta_W = current_params.eta_W;
-            dh_params.momentum = current_params.momentum;
-            % PSO uses decay_L2_goal / decay_L1_motor -> map to planning/motor decay
-            dh_params.decay_plan = current_params.decay_L2_goal;
-            dh_params.decay_motor = current_params.decay_L1_motor;
-            dh_params.motor_gain = current_params.motor_gain;
-            dh_params.damping = current_params.damping;
-            dh_params.reaching_speed_scale = current_params.reaching_speed_scale;
-            dh_params.W_plan_gain = current_params.W_L2_goal_gain;
-            dh_params.W_motor_gain = current_params.W_L1_pos_gain;
-            % If in fast debug mode, override trial length and timestep to speed up evaluation
-            if exist('fast_debug_mode','var') && fast_debug_mode
-                dh_params.T_per_trial = debug_T_per_trial;
-                dh_params.dt = debug_dt;
-            end
-            % Avoid writing a full MAT for each particle; request only returned struct
-            dh_params.save_results = false;
-            loaded_data = hierarchical_motion_inference_dual_hierarchy(dh_params, false);
-
-            % Restore visibility
-            set(0, 'DefaultFigureVisible', old_visible);
-
-            % Validate returned struct
-            if ~isstruct(loaded_data) || ~isfield(loaded_data, 'interception_error_all') || ~isfield(loaded_data, 'phases_indices')
-                error('Dual-hierarchy did not return expected results struct (interception_error_all, phases_indices)');
-            end
-            interception_error_all = loaded_data.interception_error_all;
-            phases_indices = loaded_data.phases_indices;
-
-        catch ME
-            fprintf('    ✗ Simulation failed: %s\n', ME.message);
-            set(0, 'DefaultFigureVisible', old_visible);
-            current_score = inf;
-            particles(p).score = inf;
-            iteration_scores = [iteration_scores, inf];
-            continue;
-        end
-        
-        % --- CALCULATE OBJECTIVE SCORE ---
-        n_trials_model = 4;
-        trial_reaching_dists = {};
-        for t = 1:n_trials_model
-            trial_idx = phases_indices{t};
-            %trial_reaching_dists{t} = reaching_error_all(trial_idx(end));
-            trial_reaching_dists{t} = interception_error_all(trial_idx(end));
-        end
-        
-        avg_final_reaching_dist = mean([trial_reaching_dists{:}]);
-        
-        % Calculate position RMSE for secondary metric
-        % Safe computation using saved player vs ball trajectories (fallbacks if missing)
-        pos_rmse_trial = 0;
-        try
-            if isfield(loaded_data, 'x_player') && isfield(loaded_data, 'x_ball') && isfield(loaded_data, 'phases_indices')
-                % compute RMSE across all trials/timepoints (or per-trial below if needed)
-                xp = loaded_data.x_player(:);
-                yp = loaded_data.y_player(:);
-                zp = loaded_data.z_player(:);
-                xb = loaded_data.x_ball(:);
-                yb = loaded_data.y_ball(:);
-                zb = loaded_data.z_ball(:);
-                % compute Euclidean distance per timestep and RMSE over whole run
-                dists = sqrt( (xp - xb).^2 + (yp - yb).^2 + (zp - zb).^2 );
-                pos_rmse_trial = sqrt(mean(dists.^2));
-            else
-                warning('Loaded results missing player/ball trajectories; setting pos_rmse_trial = 0');
-                pos_rmse_trial = 0;
-            end
+            parpool('local');
         catch
-            warning('Error computing pos RMSE from results; setting pos_rmse_trial = 0');
-            pos_rmse_trial = 0;
+            % If parpool can't be started, fallback to serial loop below
         end
-        
-        % Check for NaN or Inf
-        if isnan(avg_final_reaching_dist) || isinf(avg_final_reaching_dist) || ...
-           isnan(pos_rmse_trial) || isinf(pos_rmse_trial)
-            fprintf('    ✗ Unstable (NaN/Inf). Assigning high penalty.\n');
-            current_score = inf;
-        else
-            % Objective: minimize reaching distance (primary) and position error (secondary)
-            %current_score = objective_weights.reaching_distance * avg_final_reaching_dist + ...
-            %               objective_weights.position_rmse * pos_rmse_trial;
-            current_score = mean(interception_error_all(trial_idx));
+    end
+
+    % PSO config block
+    % supply your exact numbers here, e.g.:
+    numLogical = 10;    % your logical processors
+    availMB    = 20000; % your available memory in MB
+    per_worker_MB = 2000; % desired MB per worker
+
+    suggested_workers = start_safe_parpool(numLogical, availMB, per_worker_MB);
+
+    % Use parfor to evaluate particles in parallel. Each iteration must be
+    % independent and write to separate cells/arrays.
+    parfor p = 1:num_particles
+        try
+            % Minimal per-particle reporting (not printed in parfor workers)
+
+            % Map particle to dual-hierarchy params
+            dh_params = struct();
+            dh_params.eta_rep = particles(p).eta_rep;
+            dh_params.eta_W = particles(p).eta_W;
+            dh_params.momentum = particles(p).momentum;
+            dh_params.decay_plan = particles(p).decay_L2_goal;
+            dh_params.decay_motor = particles(p).decay_L1_motor;
+            dh_params.motor_gain = particles(p).motor_gain;
+            dh_params.damping = particles(p).damping;
+            dh_params.reaching_speed_scale = particles(p).reaching_speed_scale;
+            dh_params.W_plan_gain = particles(p).W_L2_goal_gain;
+            dh_params.W_motor_gain = particles(p).W_L1_pos_gain;
+            % (fast debug overrides are disabled inside parfor for compiler safety)
+            dh_params.save_results = false;
+
+            % Run model (worker returns results struct)
+            res = hierarchical_motion_inference_dual_hierarchy(dh_params, false);
+
+            % Compute score from returned struct (same as serial path)
+            if isfield(res, 'interception_error_all') && isfield(res, 'phases_indices')
+                interception_error_all_local = res.interception_error_all;
+                phases_indices_local = res.phases_indices;
+                % use final interception distance per trial
+                n_trials_model = numel(phases_indices_local);
+                trial_final = zeros(1, n_trials_model);
+                for tt = 1:n_trials_model
+                    idx_range = phases_indices_local{tt};
+                    trial_final(tt) = interception_error_all_local(idx_range(end));
+                end
+                avg_final = mean(trial_final);
+                scores(p) = avg_final;
+                loaded_data_cell{p} = res;
+            else
+                scores(p) = inf;
+                loaded_data_cell{p} = struct();
+            end
+
+            % compute new personal best info (returned to main thread)
+            personal_best_params_cell{p} = struct('eta_rep', particles(p).eta_rep, 'eta_W', particles(p).eta_W, ...
+                'momentum', particles(p).momentum, 'decay_L2_goal', particles(p).decay_L2_goal, 'decay_L1_motor', particles(p).decay_L1_motor, ...
+                'motor_gain', particles(p).motor_gain, 'damping', particles(p).damping, 'reaching_speed_scale', particles(p).reaching_speed_scale, ...
+                'W_L2_goal_gain', particles(p).W_L2_goal_gain, 'W_L1_pos_gain', particles(p).W_L1_pos_gain);
+
+        catch MEpar
+            scores(p) = inf;
+            loaded_data_cell{p} = struct();
+            personal_best_params_cell{p} = struct();
         end
-        
-        particles(p).score = current_score;
+    end
+
+    % Merge results from parallel workers back into particles and statistics
+    for p = 1:num_particles
+        current_score = scores(p);
         iteration_scores = [iteration_scores, current_score];
-        
-        fprintf('    → Score: %.6f (Reach Dist=%.4f, Pos RMSE=%.4f)\n', ...
-            current_score, avg_final_reaching_dist, pos_rmse_trial);
-        
-        % Update particle's personal best
+        particles(p).score = current_score;
+
+        % Update personal best if improved
         if current_score < particles(p).best_score
             particles(p).best_score = current_score;
-            particles(p).best_eta_rep = particles(p).eta_rep;
-            particles(p).best_eta_W = particles(p).eta_W;
-            particles(p).best_momentum = particles(p).momentum;
-            particles(p).best_decay_L2_goal = particles(p).decay_L2_goal;
-            particles(p).best_decay_L1_motor = particles(p).decay_L1_motor;
-            particles(p).best_motor_gain = particles(p).motor_gain;
-            particles(p).best_damping = particles(p).damping;
-            particles(p).best_reaching_speed_scale = particles(p).reaching_speed_scale;
-            particles(p).best_W_L2_goal_gain = particles(p).W_L2_goal_gain;
-            particles(p).best_W_L1_pos_gain = particles(p).W_L1_pos_gain;
-            fprintf('    ★ New personal best: %.6f\n', current_score);
+            pb = personal_best_params_cell{p};
+            if ~isempty(fieldnames(pb))
+                particles(p).best_eta_rep = pb.eta_rep;
+                particles(p).best_eta_W = pb.eta_W;
+                particles(p).best_momentum = pb.momentum;
+                particles(p).best_decay_L2_goal = pb.decay_L2_goal;
+                particles(p).best_decay_L1_motor = pb.decay_L1_motor;
+                particles(p).best_motor_gain = pb.motor_gain;
+                particles(p).best_damping = pb.damping;
+                particles(p).best_reaching_speed_scale = pb.reaching_speed_scale;
+                particles(p).best_W_L2_goal_gain = pb.W_L2_goal_gain;
+                particles(p).best_W_L1_pos_gain = pb.W_L1_pos_gain;
+            end
+            fprintf('    ★ Particle %d new personal best: %.6f\n', p, current_score);
         end
-        
-        % Update global best
+
+        % Update global best and save best simulation snapshot if improved
         if current_score < global_best_score
             global_best_score = current_score;
             global_best_params.eta_rep = particles(p).eta_rep;
@@ -419,18 +388,18 @@ for iteration = 1:num_iterations
             global_best_params.reaching_speed_scale = particles(p).reaching_speed_scale;
             global_best_params.W_L2_goal_gain = particles(p).W_L2_goal_gain;
             global_best_params.W_L1_pos_gain = particles(p).W_L1_pos_gain;
-            fprintf('    ✯ NEW GLOBAL BEST: %.6f ✯\n', global_best_score);
-            % Save the returned results struct for the new global best (one copy only)
+            fprintf('    ✯ NEW GLOBAL BEST (particle %d): %.6f ✯\n', p, global_best_score);
             try
-                out_dir = './figures';
-                if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+                out_dir = './figures'; if ~exist(out_dir, 'dir'), mkdir(out_dir); end
                 best_fname = fullfile(out_dir, '3D_dual_hierarchy_results_best.mat');
-                save(best_fname, '-struct', 'loaded_data', '-v7.3');
+                best_data = loaded_data_cell{p};
+                save(best_fname, 'best_data', '-v7.3');
                 fprintf('    ✓ Best results saved: %s\n', best_fname);
-            catch ME
-                fprintf('    Warning: failed to save best results: %s\n', ME.message);
+            catch MESAVE
+                fprintf('    Warning: failed to save best results: %s\n', MESAVE.message);
             end
         end
+        fprintf('  Particle %d → Score: %.6f\n', p, current_score);
     end
     
     % Record iteration statistics
