@@ -286,13 +286,13 @@ for iteration = 1:num_iterations
         end
     end
 
-    % PSO config block
-    % supply your exact numbers here, e.g.:
-    numLogical = 10;    % your logical processors
-    availMB    = 20000; % your available memory in MB
-    per_worker_MB = 2000; % desired MB per worker
-
-    suggested_workers = start_safe_parpool(numLogical, availMB, per_worker_MB);
+    % Start a safe parpool sized automatically from system specs
+    % Estimate per_worker_MB based on available memory and desired fraction
+    m = memory;
+    availMB = m.MemAvailableAllArrays/1024^2;
+    % Use 1/num_particles of available memory, but cap at 2000MB per worker
+    est_per_worker_MB = min(2000, max(500, floor(availMB / num_particles)));
+    suggested_workers = start_safe_parpool(est_per_worker_MB);
 
     % Use parfor to evaluate particles in parallel. Each iteration must be
     % independent and write to separate cells/arrays.
