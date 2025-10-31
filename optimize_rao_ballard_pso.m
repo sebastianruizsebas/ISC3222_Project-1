@@ -287,7 +287,7 @@ for iteration = 1:num_iterations
     end
 
     % On clusters, memory() may not be available. Use a fixed per_worker_MB or cluster-specific logic.
-    est_per_worker_MB = 1000; % Default to 1000MB per worker for clusters
+    est_per_worker_MB = 1500; % Default to 1500MB per worker for clusters
     suggested_workers = start_safe_parpool(est_per_worker_MB);
 
     % Use parfor to evaluate particles in parallel. Each iteration must be
