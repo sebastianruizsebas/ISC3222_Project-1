@@ -13,7 +13,7 @@ params.W_motor_gain = 0.001;              % W_L1_pos_gain
 params.weight_decay = 0.999;
 
 % task / physics options you asked about
-params.T_per_trial = 4000;      % seconds per trial
+params.T_per_trial = 60;      % seconds per trial
 params.n_trials = 4;           % number of different trajectories
 params.ensure_opportunity = true;
 params.opportunity_radius = 1.0;
@@ -23,7 +23,7 @@ params.opportunity_directed_speed_range = [0.8, 2.5];
 params.ensure_reachable = true;
 params.player_max_speed = 2.5;          % m/s
 params.player_max_accel = 6.0;          % m/s^2
-params.reachable_tolerance = 0.10;
+params.reachable_tolerance = 0.15;
 
 % other useful toggles
 params.save_results = true;   % don't write MAT file for smoke test
