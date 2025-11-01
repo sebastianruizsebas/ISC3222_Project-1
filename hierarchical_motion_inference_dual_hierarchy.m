@@ -948,7 +948,11 @@ for i = 1:N-1
 
     % If the helper signaled session end (player close to ball), stop early
     if isfield(S, 'session_end') && S.session_end
-        fprintf('\nSession terminated early at step %d (player within %.3fm of ball)\n', S.termination_step, P.termination_distance);
+        if isfield(S, 'termination_reason')
+            fprintf('\n⚠  Session terminated early at step %d: %s\n', S.termination_step, S.termination_reason);
+        else
+            fprintf('\nSession terminated early at step %d (player within %.3fm of ball)\n', S.termination_step, P.termination_distance);
+        end
         break;
     end
 
@@ -1017,6 +1021,12 @@ z_ball = max(-max_finite_value, min(max_finite_value, z_ball));
 
 fprintf('✓ Applied final Inf/NaN clipping pass (safety check for free energy and trajectories)\n\n');
 
+% Check if trial was terminated due to excessive clipping
+if isfield(S, 'termination_reason') && contains(S.termination_reason, 'Excessive consecutive Inf/NaN')
+    fprintf('⚠  TRIAL SUMMARY: Early termination triggered due to excessive Inf/NaN clipping.\n');
+    fprintf('   Reason: %s\n\n', S.termination_reason);
+end
+
 phases_indices = S.phases_indices;
 W_motor_L2_to_L1 = S.W_motor_L2_to_L1; W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
 W_plan_L2_to_L1 = S.W_plan_L2_to_L1; W_plan_L3_to_L2 = S.W_plan_L3_to_L2;
@@ -1068,6 +1078,17 @@ results.denom_trace_L1_plan = denom_trace_L1_plan; results.denom_trace_L2_plan =
 % Track total number of Inf/NaN clipping events that occurred during this run
 clipping_count = S.clipping_count;
 results.clipping_count = clipping_count;  % Add to results for easy tracking
+
+% Track early termination due to excessive clipping
+if isfield(S, 'termination_reason')
+    results.early_termination = true;
+    results.termination_reason = S.termination_reason;
+    results.termination_step = S.termination_step;
+else
+    results.early_termination = false;
+    results.termination_reason = 'Completed normally';
+    results.termination_step = N;
+end
 
 if clipping_count > 0
     fprintf('⚠  CLIPPING SUMMARY: %d Inf/NaN clipping event(s) detected and handled during this run.\n', clipping_count);

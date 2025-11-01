@@ -314,14 +314,39 @@ end
 
 % Guard: detect NaN/Inf and dump minimal snapshot for debugging (first occurrence)
 persistent nan_reported;
+persistent consecutive_clipping_count;
 if isempty(nan_reported), nan_reported = false; end
-if (~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_motor(i,:), S.E_L1_plan(i,:), S.E_L2_plan(i,:), S.interception_error_all(i)]))) && ~nan_reported
+if isempty(consecutive_clipping_count), consecutive_clipping_count = 0; end
+
+% Check for NaN/Inf occurrence
+is_nan_inf = ~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_motor(i,:), S.E_L1_plan(i,:), S.E_L2_plan(i,:), S.interception_error_all(i)]));
+
+if is_nan_inf
+    % Increment consecutive clipping counter (Nov 1, 2025 - EARLY TERMINATION LOGIC)
+    consecutive_clipping_count = consecutive_clipping_count + 1;
+else
+    % Reset consecutive counter when we see a clean step
+    consecutive_clipping_count = 0;
+end
+
+% Check if we've hit the termination threshold (50 consecutive Inf/NaN events)
+MAX_CONSECUTIVE_CLIPPING = 50;
+if consecutive_clipping_count >= MAX_CONSECUTIVE_CLIPPING
+    fprintf(2, '\n⚠  CRITICAL: %d consecutive Inf/NaN clipping events detected! Terminating trial early.\n', consecutive_clipping_count);
+    S.session_end = true;
+    S.termination_step = i;
+    S.termination_reason = sprintf('Excessive consecutive Inf/NaN clipping (%d events)', consecutive_clipping_count);
+    return;  % Exit the step function early
+end
+
+if is_nan_inf && ~nan_reported
     nan_reported = true;
     
     % INCREMENT CLIPPING COUNTER (Nov 1, 2025)
     S.clipping_count = S.clipping_count + 1;
     
-    fprintf(2, 'DEBUG WARNING: NaN/Inf detected at step %d (clipping event #%d). Dumping snapshot to ./figures/nan_snapshot.mat\n', i, S.clipping_count);
+    fprintf(2, 'DEBUG WARNING: NaN/Inf detected at step %d (clipping event #%d, consecutive: %d/%d). Dumping snapshot to ./figures/nan_snapshot.mat\n', ...
+        i, S.clipping_count, consecutive_clipping_count, MAX_CONSECUTIVE_CLIPPING);
     try
         snapshot.Sfree = S.free_energy_all(i);
         snapshot.step = i;
@@ -336,6 +361,7 @@ if (~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_
         snapshot.W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
         snapshot.pi_vals = [S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan];
         snapshot.clipping_count = S.clipping_count;  % Save current count in snapshot too
+        snapshot.consecutive_clipping_count = consecutive_clipping_count;  % Save consecutive count
 
         save(fullfile('./figures','nan_snapshot.mat'), 'snapshot');
     catch MEsave
