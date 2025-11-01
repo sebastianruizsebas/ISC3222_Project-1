@@ -112,15 +112,39 @@ if out
 end
 
 % ------------------------------
-% PREDICTION (Motor & Planning)
+% PREDICTION (Motor & Planning) WITH MULTIPLICATIVE TASK GATING
+% NEW: L0 task context now multiplicatively gates predictions
+% This implements prefrontal modulation of motor/planning circuits
 % ------------------------------
 
-% Motor region predictions
-S.pred_L2_motor(i,:) = S.R_L3_motor(i,:) * S.W_motor_L3_to_L2';
-S.pred_L2_motor(i,:) = S.pred_L2_motor(i,:) + S.R_L2_motor(i,:) * S.W_motor_L2_lat';
+% Identify current active task from L0 (one-hot encoding)
+[~, current_task_idx] = max(S.R_L0(i,:));
+if current_task_idx < 1 || current_task_idx > length(S.W_motor_L2_to_L1)
+    current_task_idx = 1;  % safety fallback
+end
 
-S.pred_L1_motor(i,:) = S.R_L2_motor(i,:) * S.W_motor_L2_to_L1';
-S.pred_L1_motor(i,:) = S.pred_L1_motor(i,:) + S.R_L1_motor(i,:) * S.W_motor_L1_lat';
+% Get task-specific weight matrices for current task
+W_motor_L2_to_L1_active = S.W_motor_L2_to_L1{current_task_idx};
+W_motor_L3_to_L2_active = S.W_motor_L3_to_L2{current_task_idx};
+W_motor_L1_lat_active = S.W_motor_L1_lat{current_task_idx};
+W_motor_L2_lat_active = S.W_motor_L2_lat{current_task_idx};
+W_motor_L3_lat_active = S.W_motor_L3_lat{current_task_idx};
+
+W_plan_L2_to_L1_active = S.W_plan_L2_to_L1{current_task_idx};
+W_plan_L3_to_L2_active = S.W_plan_L3_to_L2{current_task_idx};
+W_plan_L1_lat_active = S.W_plan_L1_lat{current_task_idx};
+W_plan_L2_lat_active = S.W_plan_L2_lat{current_task_idx};
+W_plan_L3_lat_active = S.W_plan_L3_lat{current_task_idx};
+
+% Task context gating strength (multiplicative)
+% task_gate ranges [0,1]: 0 = task completely inhibited, 1 = fully active
+task_gate_motor = S.R_L0(i, current_task_idx);  % for motor: usually 1.0 (stable forward models learn regardless)
+task_gate_plan = S.R_L0(i, current_task_idx) * 0.8 + 0.2;  % for planning: [0.2, 1.0] (some planning remains off-task)
+
+% Motor region predictions with task gating
+S.pred_L2_motor(i,:) = task_gate_motor * (S.R_L3_motor(i,:) * W_motor_L3_to_L2_active' + S.R_L2_motor(i,:) * W_motor_L2_lat_active');
+
+S.pred_L1_motor(i,:) = task_gate_motor * (S.R_L2_motor(i,:) * W_motor_L2_to_L1_active' + S.R_L1_motor(i,:) * W_motor_L1_lat_active');
 
 % extract velocity predictions using semantic indices (pad/truncate to 3 elements if needed)
 tmp_vel = S.pred_L1_motor(i, idx_vel);
@@ -131,12 +155,10 @@ S.motor_vx_motor(i) = P.motor_gain * pred_vel_motor(1);
 S.motor_vy_motor(i) = P.motor_gain * pred_vel_motor(2);
 S.motor_vz_motor(i) = P.motor_gain * pred_vel_motor(3);
 
-% Planning region predictions
-S.pred_L2_plan(i,:) = S.R_L3_plan(i,:) * S.W_plan_L3_to_L2';
-S.pred_L2_plan(i,:) = S.pred_L2_plan(i,:) + S.R_L2_plan(i,:) * S.W_plan_L2_lat';
+% Planning region predictions with task gating
+S.pred_L2_plan(i,:) = task_gate_plan * (S.R_L3_plan(i,:) * W_plan_L3_to_L2_active' + S.R_L2_plan(i,:) * W_plan_L2_lat_active');
 
-S.pred_L1_plan(i,:) = S.R_L2_plan(i,:) * S.W_plan_L2_to_L1';
-S.pred_L1_plan(i,:) = S.pred_L1_plan(i,:) + S.R_L1_plan(i,:) * S.W_plan_L1_lat';
+S.pred_L1_plan(i,:) = task_gate_plan * (S.R_L2_plan(i,:) * W_plan_L2_to_L1_active' + S.R_L1_plan(i,:) * W_plan_L1_lat_active');
 
 tmp_vel_p = S.pred_L1_plan(i, idx_vel);
 pred_vel_plan = zeros(1,3);
@@ -166,18 +188,23 @@ S.y_player(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), S.y_play
 S.z_player(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.z_player(i+1)));
 
 % ------------------------------
-% ERROR COMPUTATION
+% ERROR COMPUTATION (WITH TASK-CONDITIONAL ERRORS)
+% NEW: Compute error signals for ALL tasks, but only update current task
+% This monitors task interference and enables interference penalties
 % ------------------------------
-% use semantic indices for L1 (positions, velocities, bias)
+
+% Observation vectors (task-independent)
 pos_vec = [S.x_player(i+1), S.y_player(i+1), S.z_player(i+1)];
 vel_vec = [S.vx_player(i+1), S.vy_player(i+1), S.vz_player(i+1)];
+pos_ball = [S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)];
+
+% ONLY UPDATE ACTIVE TASK errors (avoid training off-task weights on active-task data)
 S.E_L1_motor(i, idx_pos) = pos_vec(1:numel(idx_pos)) - S.pred_L1_motor(i, idx_pos);
 S.E_L1_motor(i, idx_vel) = vel_vec(1:numel(idx_vel)) - S.pred_L1_motor(i, idx_vel);
 S.E_L1_motor(i, idx_bias) = 1 - S.pred_L1_motor(i, idx_bias);
 
 S.E_L2_motor(i,:) = S.R_L2_motor(i,:) - S.pred_L2_motor(i,:);
 
-pos_ball = [S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)];
 S.E_L1_plan(i, idx_pos) = pos_ball(1:numel(idx_pos)) - S.pred_L1_plan(i, idx_pos);
 S.E_L1_plan(i, idx_vel) = pos_ball(1:numel(idx_vel)) - S.pred_L1_plan(i, idx_vel);
 S.E_L1_plan(i, idx_bias) = 1 - S.pred_L1_plan(i, idx_bias);
@@ -185,6 +212,24 @@ S.E_L1_plan(i, idx_bias) = 1 - S.pred_L1_plan(i, idx_bias);
 S.E_L2_plan(i,:) = S.R_L2_plan(i,:) - S.pred_L2_plan(i,:);
 
 S.interception_error_all(i) = sqrt((S.x_player(i+1) - S.x_ball(i+1))^2 + (S.y_player(i+1) - S.y_ball(i+1))^2 + (S.z_player(i+1) - S.z_ball(i+1))^2);
+
+% NEW: Compute cross-task error signals for diagnostics and optional interference penalty
+% Loop over all tasks and compute what error WOULD be if that task were active
+for task_candidate = 1:numel(S.W_motor_L2_to_L1)
+    % Predictions if task_candidate were active
+    W_motor_L2_to_L1_cand = S.W_motor_L2_to_L1{task_candidate};
+    pred_L1_motor_cand = S.R_L2_motor(i,:) * W_motor_L2_to_L1_cand';
+    
+    % L1 error for this candidate task
+    E_L1_motor_cand = [pos_vec - pred_L1_motor_cand(1:3)];
+    S.task_errors_motor(i, task_candidate) = norm(E_L1_motor_cand);
+    
+    % Planning error candidate
+    W_plan_L2_to_L1_cand = S.W_plan_L2_to_L1{task_candidate};
+    pred_L1_plan_cand = S.R_L2_plan(i,:) * W_plan_L2_to_L1_cand';
+    E_L1_plan_cand = [pos_ball - pred_L1_plan_cand(1:3)];
+    S.task_errors_plan(i, task_candidate) = norm(E_L1_plan_cand);
+end
 
 % If player is sufficiently close to the ball, signal session end
 if isfield(P, 'termination_distance') && S.interception_error_all(i) <= P.termination_distance
@@ -194,10 +239,67 @@ if isfield(P, 'termination_distance') && S.interception_error_all(i) <= P.termin
 end
 
 % ------------------------------
-% FREE ENERGY
+% FREE ENERGY (WITH TASK INTERFERENCE MONITORING)
+% NEW: Add cross-task interference penalty to free energy
+% This encourages task-specific representations and prevents catastrophic forgetting
 % ------------------------------
+% Scale down interception penalty: normalize by number of L1 position channels to avoid a single large distance dominating free energy.
+n_pos_channels = numel(idx_pos);
 S.free_energy_all(i) = sum(S.E_L1_motor(i,:).^2) / (2 * S.pi_L1_motor) + sum(S.E_L2_motor(i,:).^2) / (2 * S.pi_L2_motor) + ...
-    sum(S.E_L1_plan(i,:).^2) / (2 * S.pi_L1_plan) + sum(S.E_L2_plan(i,:).^2) / (2 * S.pi_L2_plan) + (S.pi_L1_motor/100) * S.interception_error_all(i)^2;
+    sum(S.E_L1_plan(i,:).^2) / (2 * S.pi_L1_plan) + sum(S.E_L2_plan(i,:).^2) / (2 * S.pi_L2_plan) + (S.pi_L1_motor/(100 * max(1,n_pos_channels))) * S.interception_error_all(i)^2;
+
+% NEW: Add cross-task interference penalty (optional, controlled by P.interference_penalty_weight)
+if isfield(P, 'interference_penalty_weight')
+    interference_penalty_weight = P.interference_penalty_weight;
+else
+    interference_penalty_weight = 0.01;  % default: small contribution
+end
+
+if interference_penalty_weight > 0
+    % Penalize errors from non-active tasks (encourages task separation)
+    for task_idx = 1:numel(S.W_motor_L2_to_L1)
+        if task_idx ~= current_task_idx
+            % Cross-task motor error
+            motor_crosstask_error = S.task_errors_motor(i, task_idx);
+            % Cross-task planning error
+            plan_crosstask_error = S.task_errors_plan(i, task_idx);
+            % Add weighted penalty
+            S.free_energy_all(i) = S.free_energy_all(i) + interference_penalty_weight * (motor_crosstask_error^2 + plan_crosstask_error^2);
+        end
+    end
+end
+
+% Guard: detect NaN/Inf and dump minimal snapshot for debugging (first occurrence)
+persistent nan_reported;
+if isempty(nan_reported), nan_reported = false; end
+if (~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_motor(i,:), S.E_L1_plan(i,:), S.E_L2_plan(i,:), S.interception_error_all(i)]))) && ~nan_reported
+    nan_reported = true;
+    fprintf(2, 'DEBUG WARNING: NaN/Inf detected at step %d. Dumping snapshot to ./figures/nan_snapshot.mat\n', i);
+    try
+        snapshot.Sfree = S.free_energy_all(i);
+        snapshot.step = i;
+        snapshot.E_L1_motor = S.E_L1_motor(i,:);
+        snapshot.E_L2_motor = S.E_L2_motor(i,:);
+        snapshot.E_L1_plan = S.E_L1_plan(i,:);
+        snapshot.E_L2_plan = S.E_L2_plan(i,:);
+        snapshot.R_L1_motor = S.R_L1_motor(i,:);
+        snapshot.R_L2_motor = S.R_L2_motor(i,:);
+        snapshot.R_L3_motor = S.R_L3_motor(i,:);
+        snapshot.W_motor_L2_to_L1 = S.W_motor_L2_to_L1;
+        snapshot.W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
+        snapshot.pi_vals = [S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan];
+        save(fullfile('./figures','nan_snapshot.mat'), 'snapshot');
+    catch MEsave
+        fprintf(2, 'Failed to save snapshot: %s\n', MEsave.message);
+    end
+    % sanitize to prevent run-halting propagation (replace NaN/Inf with large finite fallback)
+    S.free_energy_all(i) = 1e6;
+    S.E_L1_motor(i, ~isfinite(S.E_L1_motor(i,:))) = 0;
+    S.E_L2_motor(i, ~isfinite(S.E_L2_motor(i,:))) = 0;
+    S.E_L1_plan(i, ~isfinite(S.E_L1_plan(i,:))) = 0;
+    S.E_L2_plan(i, ~isfinite(S.E_L2_plan(i,:))) = 0;
+    S.interception_error_all(i) = min(max(S.interception_error_all(i), 0), 1e6);
+end
 
 % ------------------------------
 % REPRESENTATION UPDATES
@@ -220,8 +322,9 @@ end
 S.R_L1_motor(i+1, idx_bias) = 1;
 
 % Motor L2
-coupling_motor = S.E_L1_motor(i,:) * S.W_motor_L2_to_L1;
-norm_W_motor = max(0.1, norm(S.W_motor_L2_to_L1, 'fro'));
+% Use active task's L2->L1 weights (cells) for coupling computation
+coupling_motor = S.E_L1_motor(i,:) * W_motor_L2_to_L1_active;
+norm_W_motor = max(0.1, norm(W_motor_L2_to_L1_active, 'fro'));
 coupling_motor = coupling_motor / norm_W_motor;
 delta_R_L2_motor = coupling_motor - S.E_L2_motor(i,:);
 S.R_L2_motor(i+1,:) = P.momentum * S.R_L2_motor(i,:) + decay * P.eta_rep * delta_R_L2_motor * 0.5;
@@ -246,8 +349,9 @@ S.R_L1_plan(i+1, idx_bias) = 1;
 
 % Planning L2 (task gated)
 task_gate = S.R_L0(i, S.current_trial) * 0.7 + 0.3;
-coupling_plan = S.E_L1_plan(i,:) * S.W_plan_L2_to_L1;
-norm_W_plan = max(0.1, norm(S.W_plan_L2_to_L1, 'fro'));
+% Use active task's planning L2->L1 weights
+coupling_plan = S.E_L1_plan(i,:) * W_plan_L2_to_L1_active;
+norm_W_plan = max(0.1, norm(W_plan_L2_to_L1_active, 'fro'));
 coupling_plan = coupling_plan / norm_W_plan;
 delta_R_L2_plan = coupling_plan - S.E_L2_plan(i,:);
 S.R_L2_plan(i+1,:) = P.momentum * S.R_L2_plan(i,:) + decay * P.eta_rep * delta_R_L2_plan * 0.5 * task_gate;
@@ -259,54 +363,51 @@ S.R_L3_plan(i+1,1:3) = S.R_L3_plan(i,1:3) + P.eta_rep * E_L3_plan * 0.1 * task_g
 S.R_L3_plan(i+1,1:3) = max(-1, min(1, S.R_L3_plan(i+1,1:3)));
 
 % ------------------------------
-% WEIGHT UPDATES (motor & planning) with dynamic precision
+% WEIGHT UPDATES (TASK-SELECTIVE): ONLY UPDATE ACTIVE TASK
+% NEW: Weight updates are restricted to the currently active task
+% This implements strong credit assignment and prevents interference learning
+% Off-task weights remain frozen until that task becomes active
 % ------------------------------
 layer_scale_motor_1 = max(0.1, mean(abs(S.R_L2_motor(i,:))));
 layer_scale_motor_3 = max(0.1, mean(abs(S.R_L3_motor(i,:))));
 
 dW_motor_1 = -(P.eta_W * S.pi_L1_motor / layer_scale_motor_1) * (S.E_L1_motor(i,:)' * S.R_L2_motor(i,:));
-S.W_motor_L2_to_L1 = S.W_motor_L2_to_L1 + dW_motor_1;
+S.W_motor_L2_to_L1{current_task_idx} = S.W_motor_L2_to_L1{current_task_idx} + dW_motor_1;
 
 dW_motor_3 = -(P.eta_W * S.pi_L2_motor / layer_scale_motor_3) * (S.E_L2_motor(i,:)' * S.R_L3_motor(i,:));
-S.W_motor_L3_to_L2 = S.W_motor_L3_to_L2 + dW_motor_3;
+S.W_motor_L3_to_L2{current_task_idx} = S.W_motor_L3_to_L2{current_task_idx} + dW_motor_3;
 
-% lateral motor
+% lateral motor (task-selective)
 dW_motor_L1_lat = -(P.eta_W * S.pi_L1_motor / max(0.1, mean(abs(S.R_L1_motor(i,:))))) * (S.E_L1_motor(i,:)' * S.R_L1_motor(i,:));
 dW_motor_L2_lat = -(P.eta_W * S.pi_L2_motor / max(0.1, mean(abs(S.R_L2_motor(i,:))))) * (S.E_L2_motor(i,:)' * S.R_L2_motor(i,:));
-dW_motor_L3_lat = -(P.eta_W * S.pi_L3_motor / max(0.1, mean(abs(S.R_L3_motor(i,:))))) * (mean(S.E_L2_motor(i,:))' * S.R_L3_motor(i,:));
 
-S.W_motor_L1_lat = S.W_motor_L1_lat + dW_motor_L1_lat;
-S.W_motor_L2_lat = S.W_motor_L2_lat + dW_motor_L2_lat;
-S.W_motor_L3_lat = S.W_motor_L3_lat + dW_motor_L3_lat;
+S.W_motor_L1_lat{current_task_idx} = S.W_motor_L1_lat{current_task_idx} + dW_motor_L1_lat;
+S.W_motor_L2_lat{current_task_idx} = S.W_motor_L2_lat{current_task_idx} + dW_motor_L2_lat;
 
-S.W_motor_L1_lat = S.W_motor_L1_lat * 0.9999; S.W_motor_L1_lat(1:size(S.W_motor_L1_lat,1)+1:end) = 0;
-S.W_motor_L2_lat = S.W_motor_L2_lat * 0.9999; S.W_motor_L2_lat(1:size(S.W_motor_L2_lat,1)+1:end) = 0;
-S.W_motor_L3_lat = S.W_motor_L3_lat * 0.9999; S.W_motor_L3_lat(1:size(S.W_motor_L3_lat,1)+1:end) = 0;
+S.W_motor_L1_lat{current_task_idx} = S.W_motor_L1_lat{current_task_idx} * 0.9999; S.W_motor_L1_lat{current_task_idx}(1:size(S.W_motor_L1_lat{current_task_idx},1)+1:end) = 0;
+S.W_motor_L2_lat{current_task_idx} = S.W_motor_L2_lat{current_task_idx} * 0.9999; S.W_motor_L2_lat{current_task_idx}(1:size(S.W_motor_L2_lat{current_task_idx},1)+1:end) = 0;
 
-% Planning weight updates (task gated)
+% Planning weight updates (task gated AND task-selective)
 layer_scale_plan_1 = max(0.1, mean(abs(S.R_L2_plan(i,:))));
 layer_scale_plan_3 = max(0.1, mean(abs(S.R_L3_plan(i,:))));
 
-dW_plan_1 = -(P.eta_W * S.pi_L1_plan / layer_scale_plan_1) * (S.E_L1_plan(i,:)' * S.R_L2_plan(i,:)) * task_gate;
-S.W_plan_L2_to_L1 = S.W_plan_L2_to_L1 + dW_plan_1;
+dW_plan_1 = -(P.eta_W * S.pi_L1_plan / layer_scale_plan_1) * (S.E_L1_plan(i,:)' * S.R_L2_plan(i,:)) * task_gate_plan;
+S.W_plan_L2_to_L1{current_task_idx} = S.W_plan_L2_to_L1{current_task_idx} + dW_plan_1;
 
-dW_plan_3 = -(P.eta_W * S.pi_L2_plan / layer_scale_plan_3) * (S.E_L2_plan(i,:)' * S.R_L3_plan(i,:)) * task_gate;
-S.W_plan_L3_to_L2 = S.W_plan_L3_to_L2 + dW_plan_3;
+dW_plan_3 = -(P.eta_W * S.pi_L2_plan / layer_scale_plan_3) * (S.E_L2_plan(i,:)' * S.R_L3_plan(i,:)) * task_gate_plan;
+S.W_plan_L3_to_L2{current_task_idx} = S.W_plan_L3_to_L2{current_task_idx} + dW_plan_3;
 
-dW_plan_L1_lat = -(P.eta_W * S.pi_L1_plan / max(0.1, mean(abs(S.R_L1_plan(i,:))))) * (S.E_L1_plan(i,:)' * S.R_L1_plan(i,:)) * task_gate;
-dW_plan_L2_lat = -(P.eta_W * S.pi_L2_plan / max(0.1, mean(abs(S.R_L2_plan(i,:))))) * (S.E_L2_plan(i,:)' * S.R_L2_plan(i,:)) * task_gate;
-dW_plan_L3_lat = -(P.eta_W * S.pi_L3_plan / max(0.1, mean(abs(S.R_L3_plan(i,:))))) * (mean(S.E_L2_plan(i,:))' * S.R_L3_plan(i,:)) * task_gate;
+dW_plan_L1_lat = -(P.eta_W * S.pi_L1_plan / max(0.1, mean(abs(S.R_L1_plan(i,:))))) * (S.E_L1_plan(i,:)' * S.R_L1_plan(i,:)) * task_gate_plan;
+dW_plan_L2_lat = -(P.eta_W * S.pi_L2_plan / max(0.1, mean(abs(S.R_L2_plan(i,:))))) * (S.E_L2_plan(i,:)' * S.R_L2_plan(i,:)) * task_gate_plan;
 
-S.W_plan_L1_lat = S.W_plan_L1_lat + dW_plan_L1_lat;
-S.W_plan_L2_lat = S.W_plan_L2_lat + dW_plan_L2_lat;
-S.W_plan_L3_lat = S.W_plan_L3_lat + dW_plan_L3_lat;
+S.W_plan_L1_lat{current_task_idx} = S.W_plan_L1_lat{current_task_idx} + dW_plan_L1_lat;
+S.W_plan_L2_lat{current_task_idx} = S.W_plan_L2_lat{current_task_idx} + dW_plan_L2_lat;
 
-S.W_plan_L1_lat = S.W_plan_L1_lat * 0.9999; S.W_plan_L1_lat(1:size(S.W_plan_L1_lat,1)+1:end) = 0;
-S.W_plan_L2_lat = S.W_plan_L2_lat * 0.9999; S.W_plan_L2_lat(1:size(S.W_plan_L2_lat,1)+1:end) = 0;
-S.W_plan_L3_lat = S.W_plan_L3_lat * 0.9999; S.W_plan_L3_lat(1:size(S.W_plan_L3_lat,1)+1:end) = 0;
+S.W_plan_L1_lat{current_task_idx} = S.W_plan_L1_lat{current_task_idx} * 0.9999; S.W_plan_L1_lat{current_task_idx}(1:size(S.W_plan_L1_lat{current_task_idx},1)+1:end) = 0;
+S.W_plan_L2_lat{current_task_idx} = S.W_plan_L2_lat{current_task_idx} * 0.9999; S.W_plan_L2_lat{current_task_idx}(1:size(S.W_plan_L2_lat{current_task_idx},1)+1:end) = 0;
 
 S.learning_trace_W(i) = norm(dW_motor_1, 'fro') + norm(dW_motor_3, 'fro') + norm(dW_plan_1, 'fro') + norm(dW_plan_3, 'fro') + ...
-    norm(dW_motor_L1_lat,'fro') + norm(dW_motor_L2_lat,'fro') + norm(dW_motor_L3_lat,'fro') + norm(dW_plan_L1_lat,'fro') + norm(dW_plan_L2_lat,'fro') + norm(dW_plan_L3_lat,'fro');
+    norm(dW_motor_L1_lat,'fro') + norm(dW_motor_L2_lat,'fro') + norm(dW_plan_L1_lat,'fro') + norm(dW_plan_L2_lat,'fro');
 
 % ------------------------------
 % DYNAMIC PRECISION UPDATES
@@ -371,10 +472,7 @@ S.pi_trace_L2_motor(i) = S.pi_L2_motor; S.pi_raw_trace_L2_motor(i) = raw2; S.den
 S.pi_trace_L1_plan(i) = S.pi_L1_plan; S.pi_raw_trace_L1_plan(i) = raw3; S.denom_trace_L1_plan(i) = d3;
 S.pi_trace_L2_plan(i) = S.pi_L2_plan; S.pi_raw_trace_L2_plan(i) = raw4; S.denom_trace_L2_plan(i) = d4;
 
-% Update state fields changed locally (weights already updated into S above)
-S.W_motor_L3_to_L2 = S.W_motor_L3_to_L2; S.W_motor_L2_to_L1 = S.W_motor_L2_to_L1;
-S.W_plan_L3_to_L2 = S.W_plan_L3_to_L2; S.W_plan_L2_to_L1 = S.W_plan_L2_to_L1;
-
-% Keep current_trial unchanged for now (helper may later manage phase transitions)
+% Update state fields changed locally (weights already updated into S.W_* cells above)
+% No explicit copy needed since we modified S.W_* cells directly
 % Return updated S
 end

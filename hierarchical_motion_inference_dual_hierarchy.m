@@ -580,81 +580,103 @@ fprintf('  R_L1_motor (proprioception) initialized\n');
 fprintf('  R_L1_plan (ball + goal) initialized\n\n');
 
 % ====================================================================
-% INITIALIZE WEIGHT MATRICES - DUAL HIERARCHY
+% INITIALIZE WEIGHT MATRICES - DUAL HIERARCHY (TASK-INDEXED)
 % ====================================================================
+% NEW: Maintain separate weight matrices per task to prevent interference learning.
+% Each task gets its own learned mappings, reducing catastrophic forgetting.
 
-% Motor region weights (compute semantic indices so layer sizes can be scaled)
-W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);
-W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
+% Motor region weights: task-indexed (one copy per trial)
+W_motor_L2_to_L1 = cell(n_trials, 1);  % task-specific motor basis->proprioception
+W_motor_L3_to_L2 = cell(n_trials, 1);  % task-specific output->motor basis
+W_motor_L1_lat = cell(n_trials, 1);    % task-specific lateral motor L1
+W_motor_L2_lat = cell(n_trials, 1);    % task-specific lateral motor L2
+W_motor_L3_lat = cell(n_trials, 1);    % task-specific lateral motor L3
 
-% (semantic indices already defined earlier)
+% Planning region weights: task-indexed
+W_plan_L2_to_L1 = cell(n_trials, 1);   % task-specific policy->goal
+W_plan_L3_to_L2 = cell(n_trials, 1);   % task-specific output->policy
+W_plan_L1_lat = cell(n_trials, 1);     % task-specific lateral planning L1
+W_plan_L2_lat = cell(n_trials, 1);     % task-specific lateral planning L2
+W_plan_L3_lat = cell(n_trials, 1);     % task-specific lateral planning L3
 
-% Map L3_motor (velocity-like outputs) into L1 velocity rows.
-map_vel = min(n_vel, n_L3_motor);
-W_motor_L2_to_L1(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
-
-% Weak position coupling from same L3 channels (if available)
-map_pos = min(n_pos, n_L3_motor);
-W_motor_L2_to_L1(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
-
-% Bias / offset row -- small random init
-W_motor_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
-
-% Initialize L3->L2 mapping with structured identity on the overlapping block
-map_block = min(n_L2_motor, n_L3_motor);
-fan_in3 = max(1, n_L3_motor);
-W_motor_L3_to_L2(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
-% remaining rows (if any) get small random init scaled by fan-in
-if n_L2_motor > map_block
-    W_motor_L3_to_L2(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
+% Initialize per-task weight matrices
+for task_idx = 1:n_trials
+    % --- Motor L2->L1 mappings (basis to proprioception) ---
+    W_motor_L2_to_L1{task_idx} = zeros(n_L1_motor, n_L2_motor);
+    
+    % Map L3_motor (velocity-like outputs) into L1 velocity rows.
+    map_vel = min(n_vel, n_L3_motor);
+    W_motor_L2_to_L1{task_idx}(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
+    
+    % Weak position coupling from same L3 channels (if available)
+    map_pos = min(n_pos, n_L3_motor);
+    W_motor_L2_to_L1{task_idx}(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
+    
+    % Bias / offset row -- small random init
+    W_motor_L2_to_L1{task_idx}(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
+    
+    % --- Motor L3->L2 mappings (output to basis) ---
+    W_motor_L3_to_L2{task_idx} = zeros(n_L2_motor, n_L3_motor);
+    
+    % Initialize L3->L2 mapping with structured identity on the overlapping block
+    map_block = min(n_L2_motor, n_L3_motor);
+    fan_in3 = max(1, n_L3_motor);
+    W_motor_L3_to_L2{task_idx}(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
+    % remaining rows (if any) get small random init scaled by fan-in
+    if n_L2_motor > map_block
+        W_motor_L3_to_L2{task_idx}(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
+    end
+    
+    % --- Motor lateral weights ---
+    rng(task_idx);  % reproducible per-task lateral init
+    W_motor_L1_lat{task_idx} = 0.01 * randn(n_L1_motor, n_L1_motor);
+    W_motor_L2_lat{task_idx} = 0.01 * randn(n_L2_motor, n_L2_motor);
+    W_motor_L3_lat{task_idx} = 0.01 * randn(n_L3_motor, n_L3_motor);
+    
+    % Remove strong self-connections
+    W_motor_L1_lat{task_idx}(1:size(W_motor_L1_lat{task_idx},1)+1:end) = 0;
+    W_motor_L2_lat{task_idx}(1:size(W_motor_L2_lat{task_idx},1)+1:end) = 0;
+    W_motor_L3_lat{task_idx}(1:size(W_motor_L3_lat{task_idx},1)+1:end) = 0;
+    
+    % --- Planning L2->L1 mappings (policy to goal) ---
+    W_plan_L2_to_L1{task_idx} = zeros(n_L1_plan, n_L2_plan);
+    
+    map_vel_p = min(n_vel, n_L3_plan);
+    map_pos_p = min(n_pos, n_L3_plan);
+    W_plan_L2_to_L1{task_idx}(idx_pos(1:map_pos_p), 1:map_pos_p) = 0.01 * eye(map_pos_p);
+    W_plan_L2_to_L1{task_idx}(idx_vel(1:map_vel_p), 1:map_vel_p) = 0.1 * eye(map_vel_p);
+    W_plan_L2_to_L1{task_idx}(idx_bias, :) = 0.01 * randn(1, n_L2_plan);
+    
+    % --- Planning L3->L2 mappings ---
+    W_plan_L3_to_L2{task_idx} = zeros(n_L2_plan, n_L3_plan);
+    
+    map_block_p = min(n_L2_plan, n_L3_plan);
+    fan_in3_p = max(1, n_L3_plan);
+    W_plan_L3_to_L2{task_idx}(1:map_block_p, 1:map_block_p) = W_plan_gain * eye(map_block_p);
+    if n_L2_plan > map_block_p
+        W_plan_L3_to_L2{task_idx}(map_block_p+1:end, 1:n_L3_plan) = (W_plan_gain / sqrt(fan_in3_p)) * 0.01 * randn(n_L2_plan-map_block_p, n_L3_plan);
+    end
+    
+    % --- Planning lateral weights ---
+    rng(task_idx + n_trials);  % different seed for planning
+    W_plan_L1_lat{task_idx} = 0.01 * randn(n_L1_plan, n_L1_plan);
+    W_plan_L2_lat{task_idx} = 0.01 * randn(n_L2_plan, n_L2_plan);
+    W_plan_L3_lat{task_idx} = 0.01 * randn(n_L3_plan, n_L3_plan);
+    
+    % Remove strong self-connections
+    W_plan_L1_lat{task_idx}(1:size(W_plan_L1_lat{task_idx},1)+1:end) = 0;
+    W_plan_L2_lat{task_idx}(1:size(W_plan_L2_lat{task_idx},1)+1:end) = 0;
+    W_plan_L3_lat{task_idx}(1:size(W_plan_L3_lat{task_idx},1)+1:end) = 0;
 end
 
-% Planning region weights
-W_plan_L2_to_L1 = zeros(n_L1_plan, n_L2_plan);
-W_plan_L3_to_L2 = zeros(n_L2_plan, n_L3_plan);
 
-% Map L3_plan (target velocity from planning) to L1_plan (ball + goal)
-% Use same semantic indices (pos/vel/bias) so visualization and helper code keep working
-W_plan_L2_to_L1 = zeros(n_L1_plan, n_L2_plan);
-W_plan_L3_to_L2 = zeros(n_L2_plan, n_L3_plan);
-
-map_vel_p = min(n_vel, n_L3_plan);
-map_pos_p = min(n_pos, n_L3_plan);
-W_plan_L2_to_L1(idx_pos(1:map_pos_p), 1:map_pos_p) = 0.01 * eye(map_pos_p);
-W_plan_L2_to_L1(idx_vel(1:map_vel_p), 1:map_vel_p) = 0.1 * eye(map_vel_p);
-W_plan_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_plan);
-
-map_block_p = min(n_L2_plan, n_L3_plan);
-fan_in3_p = max(1, n_L3_plan);
-W_plan_L3_to_L2(1:map_block_p, 1:map_block_p) = W_plan_gain * eye(map_block_p);
-if n_L2_plan > map_block_p
-    W_plan_L3_to_L2(map_block_p+1:end, 1:n_L3_plan) = (W_plan_gain / sqrt(fan_in3_p)) * 0.01 * randn(n_L2_plan-map_block_p, n_L3_plan);
-end
-
-% --- NEW: LATERAL (WITHIN-LAYER) WEIGHTS (small random init) ---
-rng(0); % reproducible lateral init
-W_motor_L1_lat = 0.01 * randn(n_L1_motor, n_L1_motor);
-W_motor_L2_lat = 0.01 * randn(n_L2_motor, n_L2_motor);
-W_motor_L3_lat = 0.01 * randn(n_L3_motor, n_L3_motor);
-W_plan_L1_lat  = 0.01 * randn(n_L1_plan,  n_L1_plan);
-W_plan_L2_lat  = 0.01 * randn(n_L2_plan,  n_L2_plan);
-W_plan_L3_lat  = 0.01 * randn(n_L3_plan,  n_L3_plan);
-
-% Remove strong self-connections initially (use size(...) to be robust to changes)
-W_motor_L1_lat(1:size(W_motor_L1_lat,1)+1:end) = 0;
-W_motor_L2_lat(1:size(W_motor_L2_lat,1)+1:end) = 0;
-W_motor_L3_lat(1:size(W_motor_L3_lat,1)+1:end) = 0;
-W_plan_L1_lat(1:size(W_plan_L1_lat,1)+1:end)   = 0;
-W_plan_L2_lat(1:size(W_plan_L2_lat,1)+1:end)   = 0;
-W_plan_L3_lat(1:size(W_plan_L3_lat,1)+1:end)   = 0;
-
-fprintf('WEIGHT MATRICES INITIALIZED:\n');
-fprintf('  Motor Region:\n');
-fprintf('    W_motor_L2_to_L1: Motor Basis → Proprioception (%dx%d)\n', n_L1_motor, n_L2_motor);
-fprintf('    W_motor_L3_to_L2: Output → Basis (%dx%d)\n', n_L2_motor, n_L3_motor);
-fprintf('  Planning Region:\n');
-fprintf('    W_plan_L2_to_L1: Policies → Goal State (%dx%d)\n', n_L1_plan, n_L2_plan);
-fprintf('    W_plan_L3_to_L2: Output → Policies (%dx%d)\n\n', n_L2_plan, n_L3_plan);
+fprintf('WEIGHT MATRICES INITIALIZED (TASK-INDEXED):\n');
+fprintf('  Motor Region: %d separate task copies\n', n_trials);
+fprintf('    W_motor_L2_to_L1{task}: Motor Basis → Proprioception (%dx%d each)\n', n_L1_motor, n_L2_motor);
+fprintf('    W_motor_L3_to_L2{task}: Output → Basis (%dx%d each)\n', n_L2_motor, n_L3_motor);
+fprintf('  Planning Region: %d separate task copies\n', n_trials);
+fprintf('    W_plan_L2_to_L1{task}: Policies → Goal State (%dx%d each)\n', n_L1_plan, n_L2_plan);
+fprintf('    W_plan_L3_to_L2{task}: Output → Policies (%dx%d each)\n\n', n_L2_plan, n_L3_plan);
 
 % ====================================================================
 % ERROR AND LEARNING TRACKING
@@ -690,9 +712,10 @@ denom_trace_L2_motor = zeros(1, N);
 denom_trace_L1_plan  = zeros(1, N);
 denom_trace_L2_plan  = zeros(1, N);
 
-% Smoothing and step-limiting for precision updates to avoid saturation
-pi_smooth_alpha = 0.995;        % strong smoothing (closer to 1 => slower changes)
-pi_max_step_ratio = 1.2;        % max allowed multiplicative change per step (20%)
+% Smoothing and (tighter) step‑limiting for precision updates to avoid sudden spikes
+% Make precision updates more conservative: slower smoothing and smaller per‑step multiplicative changes
+pi_smooth_alpha = 0.999;        % stronger smoothing (closer to 1 => much slower changes)
+pi_max_step_ratio = 1.05;       % tighter max allowed multiplicative change per step (~5%)
 
 % Dynamic precision histories
 window_size = 100;
@@ -700,6 +723,12 @@ L1_motor_error_history = [];
 L2_motor_error_history = [];
 L1_plan_error_history = [];
 L2_plan_error_history = [];
+
+% NEW: Per-task error tracking for interference monitoring
+% task_errors_motor(i, t) = error of motor predictions IF task t were active at step i
+% task_errors_plan(i, t) = error of planning predictions IF task t were active at step i
+task_errors_motor = zeros(N, n_trials, 'single');
+task_errors_plan = zeros(N, n_trials, 'single');
 
 % ====================================================================
 % MAIN LEARNING LOOP - DUAL HIERARCHY
@@ -733,7 +762,7 @@ S.pred_L1_plan = pred_L1_plan; S.pred_L2_plan = pred_L2_plan;
 S.E_L1_motor = E_L1_motor; S.E_L2_motor = E_L2_motor;
 S.E_L1_plan = E_L1_plan; S.E_L2_plan = E_L2_plan;
 
-% Weight matrices
+% Weight matrices (task-indexed cells)
 S.W_motor_L2_to_L1 = W_motor_L2_to_L1; S.W_motor_L3_to_L2 = W_motor_L3_to_L2;
 S.W_plan_L2_to_L1 = W_plan_L2_to_L1; S.W_plan_L3_to_L2 = W_plan_L3_to_L2;
 S.W_motor_L1_lat = W_motor_L1_lat; S.W_motor_L2_lat = W_motor_L2_lat; S.W_motor_L3_lat = W_motor_L3_lat;
@@ -742,6 +771,10 @@ S.W_plan_L1_lat = W_plan_L1_lat; S.W_plan_L2_lat = W_plan_L2_lat; S.W_plan_L3_la
 % Learning traces
 S.free_energy_all = free_energy_all; S.interception_error_all = interception_error_all;
 S.learning_trace_W = learning_trace_W;
+
+% Per-task error tracking (for interference monitoring)
+S.task_errors_motor = task_errors_motor;
+S.task_errors_plan = task_errors_plan;
 
 % Precision traces and raw/denom traces
 S.pi_trace_L1_motor = pi_trace_L1_motor; S.pi_trace_L2_motor = pi_trace_L2_motor;
@@ -848,16 +881,24 @@ for i = 1:N-1
                 S.R_L3_plan(i, 1:3) = reach_direction * reaching_speed;
                 
                 % Apply phase transition decay - differential for motor vs. planning
-                % Apply phase transition decay directly to S so helper sees updated weights
-                S.W_motor_L2_to_L1 = decay_motor * S.W_motor_L2_to_L1;
-                S.W_motor_L3_to_L2 = decay_motor * S.W_motor_L3_to_L2;
+                % Weight matrices are stored as cell arrays (one per task). Apply
+                % decay to each task-specific matrix so we don't attempt numeric
+                % ops on cell containers.
+                for tt = 1:numel(S.W_motor_L2_to_L1)
+                    S.W_motor_L2_to_L1{tt} = decay_motor * S.W_motor_L2_to_L1{tt};
+                    S.W_motor_L3_to_L2{tt} = decay_motor * S.W_motor_L3_to_L2{tt};
+                end
 
-                S.W_plan_L2_to_L1 = decay_plan * S.W_plan_L2_to_L1;
-                S.W_plan_L3_to_L2 = decay_plan * S.W_plan_L3_to_L2;
+                for tt = 1:numel(S.W_plan_L2_to_L1)
+                    S.W_plan_L2_to_L1{tt} = decay_plan * S.W_plan_L2_to_L1{tt};
+                    S.W_plan_L3_to_L2{tt} = decay_plan * S.W_plan_L3_to_L2{tt};
+                end
 
                 % Restore critical motor mappings (use semantic idx_vel for robustness)
+                % Write this into the current trial's motor mapping so the active
+                % task retains the basic velocity-to-output mapping.
                 map_vel_idx = idx_vel(1:min(3, numel(idx_vel)));
-                S.W_motor_L2_to_L1(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
+                S.W_motor_L2_to_L1{trial}(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
 
                 current_trial = trial;
                 S.current_trial = current_trial; % ensure helper uses the updated trial index
