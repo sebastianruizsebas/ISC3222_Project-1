@@ -135,6 +135,9 @@ for trial = 1:n_trials
     end
 end
 
+% Enforce player starts on ground plane (z = 0) regardless of any overrides
+initial_positions(:,3) = 0;
+
 % Randomized ball trajectories (can be replaced via params later)
 rng(42);
 ball_trajectories = {};
