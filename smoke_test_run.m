@@ -13,8 +13,8 @@ params.W_motor_gain = 0.001;              % W_L1_pos_gain
 params.weight_decay = 0.999;
 
 % task / physics options you asked about
-params.T_per_trial = 60;      % seconds per trial
-params.n_trials = 4;           % number of different trajectories
+params.T_per_trial = 2.5;      % seconds per trial
+params.n_trials = 1;           % number of different trajectories
 params.ensure_opportunity = true;
 params.opportunity_radius = 1.0;
 params.opportunity_max_attempts = 1000;
