@@ -67,6 +67,21 @@ if ~exist('restitution', 'var'), restitution = 0.75; end    % 0..1 bounce energy
 if ~exist('ground_friction', 'var'), ground_friction = 0.90; end % 0..1 lateral speed retained on bounce
 if ~exist('air_drag', 'var'), air_drag = 0.001; end         % small fractional velocity loss per step
 
+% --------------------------------------------------------------------
+% Tunable trajectory-generation parameters exposed via `params`
+% (provide defaults here so the candidate generator below can reference them)
+if nargin > 0 && isstruct(params) && isfield(params, 'vmax_ball')
+    vmax_ball = params.vmax_ball;
+else
+    vmax_ball = 8.0; % m/s, tuneable upper limit for ball initial speed
+end
+if nargin > 0 && isstruct(params) && isfield(params, 'min_start_sep')
+    min_start_sep = params.min_start_sep;
+else
+    min_start_sep = 0.5; % meters
+end
+% --------------------------------------------------------------------
+
 % ====================================================================
 % TASK CONFIGURATION: PLAYER CHASING MOVING BALL
 % ====================================================================
@@ -221,7 +236,6 @@ for trial = 1:n_trials
             v0 = (pass_pos - start_pos(:) - 0.5 * a_total * (t_pass^2)) / max(1e-9, t_pass);
 
             % reject if required speed is unrealistic (keeps candidates feasible)
-            vmax_ball = 8.0; % m/s, tuneable upper limit for ball initial speed
             if norm(v0) <= vmax_ball
                 velocity = v0(:)';            % row vector
                 acceleration = intrinsic_acc(:)'; % row vector (gravity applied in pre-sim)
@@ -252,6 +266,34 @@ for trial = 1:n_trials
                 new_start_col(3) = min(max(new_start_col(3), workspace_bounds(3,1)), workspace_bounds(3,2));
                 % Assign adjusted start_pos (keep row-vector convention used elsewhere)
                 start_pos = new_start_col(:)';
+                % Ensure adjusted start_pos isn't placed too close to the player start
+                if isstruct(params) && isfield(params, 'min_start_sep')
+                    local_min_sep = params.min_start_sep;
+                else
+                    local_min_sep = 0.5;
+                end
+                if norm(start_pos(:)' - player_start(:)') < local_min_sep
+                    dir_away = (start_pos(:)' - player_start(:)');
+                    ndir = norm(dir_away);
+                    if ndir < 1e-6
+                        dir_away = [1,0,0]; ndir = 1;
+                    end
+                    dir_away = dir_away / ndir;
+                    nudged = player_start(:)' + dir_away * local_min_sep;
+                    % clamp to workspace bounds
+                    nudged(1) = min(max(nudged(1), workspace_bounds(1,1)), workspace_bounds(1,2));
+                    nudged(2) = min(max(nudged(2), workspace_bounds(2,1)), workspace_bounds(2,2));
+                    nudged(3) = min(max(nudged(3), workspace_bounds(3,1)), workspace_bounds(3,2));
+                    start_pos = nudged;
+                    % recompute v0 for nudged start
+                    v0_adj = (pass_pos_col - start_pos(:) - a_term) / max(1e-9, t_pass);
+                    velocity = v0_adj(:)';
+                    % clamp magnitude if necessary
+                    n_v0 = norm(velocity);
+                    if n_v0 > vmax_ball * 1.001
+                        velocity = (velocity / n_v0) * vmax_ball;
+                    end
+                end
                 % Recompute v0 for the adjusted start_pos
                 v0_adj = (pass_pos_col - start_pos(:) - a_term) / max(1e-9, t_pass);
                 % Use the adjusted velocity and intrinsic acceleration
@@ -817,9 +859,26 @@ for i = 1:N-1
                 current_trial = trial;
                 S.current_trial = current_trial; % ensure helper uses the updated trial index
                 
+                % Safety: ensure ball and player are not exactly coincident after reset
+                if isstruct(params) && isfield(params, 'min_start_sep')
+                    local_min_sep = params.min_start_sep;
+                else
+                    local_min_sep = 0.5;
+                end
+                sep_now = norm([S.x_ball(i), S.y_ball(i), S.z_ball(i)] - [S.x_player(i), S.y_player(i), S.z_player(i)]);
+                if sep_now < local_min_sep
+                    dirn = randn(1,3); dirn = dirn / (norm(dirn)+1e-9);
+                    newpos = [S.x_player(i), S.y_player(i), S.z_player(i)] + dirn * local_min_sep;
+                    newpos(1) = min(max(newpos(1), workspace_bounds(1,1)), workspace_bounds(1,2));
+                    newpos(2) = min(max(newpos(2), workspace_bounds(2,1)), workspace_bounds(2,2));
+                    newpos(3) = min(max(newpos(3), workspace_bounds(3,1)), workspace_bounds(3,2));
+                    S.x_ball(i) = newpos(1); S.y_ball(i) = newpos(2); S.z_ball(i) = newpos(3);
+                    S.vx_ball(i) = 0; S.vy_ball(i) = 0; S.vz_ball(i) = 0;
+                end
+
                 fprintf('\n[Trial %d started at step %d, Task Context: R_L0(i,%d)=1]\n', trial, i, trial);
-                fprintf('  Player reset to: [%.2f, %.2f, %.2f]\n', x_player(i), y_player(i), z_player(i));
-                fprintf('  Ball reset to: [%.2f, %.2f, %.2f]\n', x_ball(i), y_ball(i), z_ball(i));
+                fprintf('  Player reset to: [%.2f, %.2f, %.2f]\n', S.x_player(i), S.y_player(i), S.z_player(i));
+                fprintf('  Ball reset to: [%.2f, %.2f, %.2f]\n', S.x_ball(i), S.y_ball(i), S.z_ball(i));
                 fprintf('  Weight decay (Motor: %.2f→%.0f%%, Planning: %.2f→%.0f%%)\n', ...
                     decay_motor, 100*decay_motor, decay_plan, 100*decay_plan);
                 

@@ -24,6 +24,9 @@ params.ensure_reachable = true;
 params.player_max_speed = 2.5;          % m/s
 params.player_max_accel = 6.0;          % m/s^2
 params.reachable_tolerance = 0.15;
+% tuning knobs exposed to main runner
+params.vmax_ball = 6.0;                 % max allowed initial ball speed (m/s)
+params.min_start_sep = 2;             % minimum separation between player and ball start (m)
 
 % other useful toggles
 params.save_results = true;   % don't write MAT file for smoke test
