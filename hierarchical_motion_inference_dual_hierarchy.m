@@ -796,6 +796,9 @@ S.pi_L3_motor_base = pi_L3_motor; S.pi_L3_plan_base = pi_L3_plan;
 S.L1_motor_error_history = L1_motor_error_history; S.L2_motor_error_history = L2_motor_error_history;
 S.L1_plan_error_history = L1_plan_error_history; S.L2_plan_error_history = L2_plan_error_history;
 
+% CLIPPING COUNTER (Nov 1, 2025): Track how many Inf/NaN clipping events occur
+S.clipping_count = 0;  % Counter incremented each time clipping is triggered
+
 % Misc
 S.current_trial = current_trial;
 S.phases_indices = phases_indices;
@@ -977,6 +980,43 @@ R_L1_motor = S.R_L1_motor; R_L2_motor = S.R_L2_motor; R_L3_motor = S.R_L3_motor;
 R_L1_plan = S.R_L1_plan; R_L2_plan = S.R_L2_plan; R_L3_plan = S.R_L3_plan;
 interception_error_all = S.interception_error_all;
 free_energy_all = S.free_energy_all;
+
+% ====================================================================
+% FINAL INF/NAN CLIPPING PASS (Nov 1, 2025)
+% ====================================================================
+% Ensure all critical output arrays are finite before returning to caller
+% This prevents NaN/Inf from propagating through optimization / plotting stages
+
+max_finite_value = 1e8;
+min_valid_free_energy = 0;
+max_valid_free_energy = 1e7;
+
+% Clip free energy to safe range
+free_energy_all = max(min_valid_free_energy, min(max_valid_free_energy, free_energy_all));
+free_energy_all(~isfinite(free_energy_all)) = max_valid_free_energy;
+
+% Clip interception error to safe range
+interception_error_all = max(0, min(max_finite_value, interception_error_all));
+interception_error_all(~isfinite(interception_error_all)) = max_finite_value;
+
+% Clip all representation matrices
+R_L1_motor = max(-max_finite_value, min(max_finite_value, R_L1_motor));
+R_L2_motor = max(-max_finite_value, min(max_finite_value, R_L2_motor));
+R_L3_motor = max(-max_finite_value, min(max_finite_value, R_L3_motor));
+R_L1_plan = max(-max_finite_value, min(max_finite_value, R_L1_plan));
+R_L2_plan = max(-max_finite_value, min(max_finite_value, R_L2_plan));
+R_L3_plan = max(-max_finite_value, min(max_finite_value, R_L3_plan));
+
+% Clip trajectory arrays
+x_player = max(-max_finite_value, min(max_finite_value, x_player));
+y_player = max(-max_finite_value, min(max_finite_value, y_player));
+z_player = max(-max_finite_value, min(max_finite_value, z_player));
+x_ball = max(-max_finite_value, min(max_finite_value, x_ball));
+y_ball = max(-max_finite_value, min(max_finite_value, y_ball));
+z_ball = max(-max_finite_value, min(max_finite_value, z_ball));
+
+fprintf('✓ Applied final Inf/NaN clipping pass (safety check for free energy and trajectories)\n\n');
+
 phases_indices = S.phases_indices;
 W_motor_L2_to_L1 = S.W_motor_L2_to_L1; W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
 W_plan_L2_to_L1 = S.W_plan_L2_to_L1; W_plan_L3_to_L2 = S.W_plan_L3_to_L2;
@@ -1022,6 +1062,19 @@ results.pi_raw_trace_L1_plan = pi_raw_trace_L1_plan; results.pi_raw_trace_L2_pla
 results.denom_trace_L1_motor = denom_trace_L1_motor; results.denom_trace_L2_motor = denom_trace_L2_motor;
 results.denom_trace_L1_plan = denom_trace_L1_plan; results.denom_trace_L2_plan = denom_trace_L2_plan;
 
+% ====================================================================
+% CLIPPING STATISTICS (Nov 1, 2025)
+% ====================================================================
+% Track total number of Inf/NaN clipping events that occurred during this run
+clipping_count = S.clipping_count;
+results.clipping_count = clipping_count;  % Add to results for easy tracking
+
+if clipping_count > 0
+    fprintf('⚠  CLIPPING SUMMARY: %d Inf/NaN clipping event(s) detected and handled during this run.\n', clipping_count);
+else
+    fprintf('✓ CLIPPING SUMMARY: No Inf/NaN clipping events occurred (clean run).\n');
+end
+
 % Decide whether to save a MAT file to disk. Default: true (backwards compatible).
 save_results = true;
 if nargin > 0 && isstruct(params) && isfield(params, 'save_results')
@@ -1038,6 +1091,7 @@ if save_results
         results_filename = fullfile(output_dir, '3D_dual_hierarchy_results.mat');
         save(results_filename, '-struct', 'results', '-v7.3');
         fprintf('✓ Results saved: %s\n', results_filename);
+        fprintf('   (includes clipping_count = %d)\n', clipping_count);
     catch ME
         fprintf('Warning: MAT file save failed: %s\n', ME.message);
     end

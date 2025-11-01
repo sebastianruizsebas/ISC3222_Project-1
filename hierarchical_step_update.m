@@ -245,8 +245,44 @@ end
 % ------------------------------
 % Scale down interception penalty: normalize by number of L1 position channels to avoid a single large distance dominating free energy.
 n_pos_channels = numel(idx_pos);
-S.free_energy_all(i) = sum(S.E_L1_motor(i,:).^2) / (2 * S.pi_L1_motor) + sum(S.E_L2_motor(i,:).^2) / (2 * S.pi_L2_motor) + ...
-    sum(S.E_L1_plan(i,:).^2) / (2 * S.pi_L1_plan) + sum(S.E_L2_plan(i,:).^2) / (2 * S.pi_L2_plan) + (S.pi_L1_motor/(100 * max(1,n_pos_channels))) * S.interception_error_all(i)^2;
+
+% STRONG CLIPPING: Ensure precision values are always safe and finite (prevents Inf/NaN)
+max_finite_value = 1e8;
+min_precision = 0.01;
+max_precision = 1e6;
+
+% Clip precision values to safe ranges
+pi_L1_motor_safe = max(min_precision, min(max_precision, S.pi_L1_motor));
+pi_L2_motor_safe = max(min_precision, min(max_precision, S.pi_L2_motor));
+pi_L1_plan_safe = max(min_precision, min(max_precision, S.pi_L1_plan));
+pi_L2_plan_safe = max(min_precision, min(max_precision, S.pi_L2_plan));
+
+% Check if any precision was clipped (outside safe range)
+if (S.pi_L1_motor ~= pi_L1_motor_safe) || (S.pi_L2_motor ~= pi_L2_motor_safe) || ...
+   (S.pi_L1_plan ~= pi_L1_plan_safe) || (S.pi_L2_plan ~= pi_L2_plan_safe)
+    S.clipping_count = S.clipping_count + 1;  % Count precision clipping event
+end
+
+% Clip error vectors to prevent overflow
+E_L1_motor_clipped = max(-max_finite_value, min(max_finite_value, S.E_L1_motor(i,:)));
+E_L2_motor_clipped = max(-max_finite_value, min(max_finite_value, S.E_L2_motor(i,:)));
+E_L1_plan_clipped = max(-max_finite_value, min(max_finite_value, S.E_L1_plan(i,:)));
+E_L2_plan_clipped = max(-max_finite_value, min(max_finite_value, S.E_L2_plan(i,:)));
+interception_error_clipped = max(0, min(max_finite_value, S.interception_error_all(i)));
+
+% Check if any error was clipped (outside safe range)
+if any(S.E_L1_motor(i,:) ~= E_L1_motor_clipped) || any(S.E_L2_motor(i,:) ~= E_L2_motor_clipped) || ...
+   any(S.E_L1_plan(i,:) ~= E_L1_plan_clipped) || any(S.E_L2_plan(i,:) ~= E_L2_plan_clipped) || ...
+   (S.interception_error_all(i) ~= interception_error_clipped)
+    S.clipping_count = S.clipping_count + 1;  % Count error clipping event
+end
+
+% Compute free energy with clipped values
+S.free_energy_all(i) = sum(E_L1_motor_clipped.^2) / (2 * pi_L1_motor_safe) + sum(E_L2_motor_clipped.^2) / (2 * pi_L2_motor_safe) + ...
+    sum(E_L1_plan_clipped.^2) / (2 * pi_L1_plan_safe) + sum(E_L2_plan_clipped.^2) / (2 * pi_L2_plan_safe) + (pi_L1_motor_safe/(100 * max(1,n_pos_channels))) * interception_error_clipped^2;
+
+% Clip the computed free energy to safe range
+S.free_energy_all(i) = max(0, min(1e7, S.free_energy_all(i)));
 
 % NEW: Add cross-task interference penalty (optional, controlled by P.interference_penalty_weight)
 if isfield(P, 'interference_penalty_weight')
@@ -259,14 +295,21 @@ if interference_penalty_weight > 0
     % Penalize errors from non-active tasks (encourages task separation)
     for task_idx = 1:numel(S.W_motor_L2_to_L1)
         if task_idx ~= current_task_idx
-            % Cross-task motor error
-            motor_crosstask_error = S.task_errors_motor(i, task_idx);
-            % Cross-task planning error
-            plan_crosstask_error = S.task_errors_plan(i, task_idx);
-            % Add weighted penalty
-            S.free_energy_all(i) = S.free_energy_all(i) + interference_penalty_weight * (motor_crosstask_error^2 + plan_crosstask_error^2);
+            % Clip cross-task errors to safe ranges
+            motor_crosstask_error = max(0, min(max_finite_value, S.task_errors_motor(i, task_idx)));
+            plan_crosstask_error = max(0, min(max_finite_value, S.task_errors_plan(i, task_idx)));
+            % Add weighted penalty (clipped to prevent explosion)
+            penalty_term = interference_penalty_weight * (motor_crosstask_error^2 + plan_crosstask_error^2);
+            penalty_term = min(1e7, penalty_term);  % Prevent penalty from dominating
+            S.free_energy_all(i) = S.free_energy_all(i) + penalty_term;
         end
     end
+end
+
+% FINAL SAFETY CLIP: Ensure free energy is finite
+S.free_energy_all(i) = max(0, min(1e7, S.free_energy_all(i)));
+if ~isfinite(S.free_energy_all(i))
+    S.free_energy_all(i) = 1e7;  % Hard fallback
 end
 
 % Guard: detect NaN/Inf and dump minimal snapshot for debugging (first occurrence)
@@ -274,7 +317,11 @@ persistent nan_reported;
 if isempty(nan_reported), nan_reported = false; end
 if (~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_motor(i,:), S.E_L1_plan(i,:), S.E_L2_plan(i,:), S.interception_error_all(i)]))) && ~nan_reported
     nan_reported = true;
-    fprintf(2, 'DEBUG WARNING: NaN/Inf detected at step %d. Dumping snapshot to ./figures/nan_snapshot.mat\n', i);
+    
+    % INCREMENT CLIPPING COUNTER (Nov 1, 2025)
+    S.clipping_count = S.clipping_count + 1;
+    
+    fprintf(2, 'DEBUG WARNING: NaN/Inf detected at step %d (clipping event #%d). Dumping snapshot to ./figures/nan_snapshot.mat\n', i, S.clipping_count);
     try
         snapshot.Sfree = S.free_energy_all(i);
         snapshot.step = i;
@@ -288,17 +335,34 @@ if (~isfinite(S.free_energy_all(i)) || any(~isfinite([S.E_L1_motor(i,:), S.E_L2_
         snapshot.W_motor_L2_to_L1 = S.W_motor_L2_to_L1;
         snapshot.W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
         snapshot.pi_vals = [S.pi_L1_motor, S.pi_L2_motor, S.pi_L1_plan, S.pi_L2_plan];
+        snapshot.clipping_count = S.clipping_count;  % Save current count in snapshot too
+
         save(fullfile('./figures','nan_snapshot.mat'), 'snapshot');
     catch MEsave
         fprintf(2, 'Failed to save snapshot: %s\n', MEsave.message);
     end
-    % sanitize to prevent run-halting propagation (replace NaN/Inf with large finite fallback)
-    S.free_energy_all(i) = 1e6;
+    % STRONG SANITIZATION: Replace all NaN/Inf with safe fallback values
+    S.free_energy_all(i) = 1e7;  % Penalize but keep finite
+    
+    % Clip all error signals to safe ranges
     S.E_L1_motor(i, ~isfinite(S.E_L1_motor(i,:))) = 0;
     S.E_L2_motor(i, ~isfinite(S.E_L2_motor(i,:))) = 0;
     S.E_L1_plan(i, ~isfinite(S.E_L1_plan(i,:))) = 0;
     S.E_L2_plan(i, ~isfinite(S.E_L2_plan(i,:))) = 0;
-    S.interception_error_all(i) = min(max(S.interception_error_all(i), 0), 1e6);
+    
+    % Clip each error element to safe range
+    S.E_L1_motor(i,:) = max(-max_finite_value, min(max_finite_value, S.E_L1_motor(i,:)));
+    S.E_L2_motor(i,:) = max(-max_finite_value, min(max_finite_value, S.E_L2_motor(i,:)));
+    S.E_L1_plan(i,:) = max(-max_finite_value, min(max_finite_value, S.E_L1_plan(i,:)));
+    S.E_L2_plan(i,:) = max(-max_finite_value, min(max_finite_value, S.E_L2_plan(i,:)));
+    
+    S.interception_error_all(i) = max(0, min(max_finite_value, S.interception_error_all(i)));
+    
+    % Update S precisions to safe values
+    S.pi_L1_motor = max(min_precision, min(max_precision, S.pi_L1_motor));
+    S.pi_L2_motor = max(min_precision, min(max_precision, S.pi_L2_motor));
+    S.pi_L1_plan = max(min_precision, min(max_precision, S.pi_L1_plan));
+    S.pi_L2_plan = max(min_precision, min(max_precision, S.pi_L2_plan));
 end
 
 % ------------------------------
