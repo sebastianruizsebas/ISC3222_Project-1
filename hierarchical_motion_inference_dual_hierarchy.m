@@ -88,8 +88,8 @@ end
 
 % Timing defaults (can be overridden by params)
 dt = 0.01;              % Time step (s)
-T_per_trial = 20;      % Duration per trial (s) - smaller default for quicker runs
-n_trials = 4;           % Number of different ball trajectories
+T_per_trial = 50;      % Duration per trial (s) - smaller default for quicker runs
+n_trials = 1;           % Number of different ball trajectories
 
 if nargin > 0 && isstruct(params)
     if isfield(params, 'dt'), dt = params.dt; end
@@ -114,7 +114,7 @@ end
 workspace_bounds = [
     -10, 10;      % X bounds
     -10, 10;      % Y bounds
-    -5, 10        % Z bounds
+    0, 5;        % Z bounds
 ];
 
 % Initial player positions for each trial
@@ -138,262 +138,49 @@ end
 % Enforce player starts on ground plane (z = 0) regardless of any overrides
 initial_positions(:,3) = 0;
 
-% Randomized ball trajectories (can be replaced via params later)
-rng(42);
+% FIXED DETERMINISTIC BALL TRAJECTORIES
+% Each trial has a predefined, identical trajectory (no randomization)
+% This ensures perfect reproducibility across all runs
 ball_trajectories = {};
-% Optional: ensure the generated trajectory passes within an "opportunity" radius
-% of the player's start position for that trial (gives player a chance to intercept
-% but does NOT force the controller to succeed).
-if nargin > 0 && isstruct(params) && isfield(params, 'ensure_opportunity') && params.ensure_opportunity
-    ensure_opportunity = true;
-    if isfield(params, 'opportunity_radius')
-        opportunity_radius = params.opportunity_radius;
-    else
-        opportunity_radius = 1.5;
-    end
-    if isfield(params, 'opportunity_max_attempts')
-        opportunity_max_attempts = params.opportunity_max_attempts;
-    else
-        opportunity_max_attempts = 2000; % raise attempts to improve chance
-    end
 
-    % Directed sampling: with some probability bias candidates toward player start
-    if isfield(params, 'opportunity_directed_prob')
-        opportunity_directed_prob = params.opportunity_directed_prob;
-    else
-        opportunity_directed_prob = 0.25; % 25% candidates aimed at player
-    end
-    if isfield(params, 'opportunity_directed_speed_range')
-        opportunity_directed_speed_range = params.opportunity_directed_speed_range;
-    else
-        opportunity_directed_speed_range = [0.5, 3.0]; % horizontal speed range (m/s)
-    end
-else
-    ensure_opportunity = false;
+fprintf('GENERATING FIXED BALL TRAJECTORIES (DETERMINISTIC):\n');
+
+% Define four distinct but fixed ball trajectories
+% Format: struct with 'start_pos', 'velocity', 'acceleration' (row vectors)
+
+% Trial 1: Ball moving diagonally upward then forward
+ball_trajectories{1} = struct(...
+    'start_pos', [2.0, 2.0, 1.0], ...
+    'velocity', [2.5, 1.5, 1.0], ...
+    'acceleration', [0.1, 0.0, 0.0]);
+
+% Trial 2: Ball moving primarily in X direction with some vertical component
+ball_trajectories{2} = struct(...
+    'start_pos', [2.0, 2.0, 1.0], ...
+    'velocity', [3.0, 0.5, 0.5], ...
+    'acceleration', [0.0, 0.05, -0.1]);
+
+% Trial 3: Ball moving in Y direction with upward arc
+ball_trajectories{3} = struct(...
+    'start_pos', [2.0, 2.0, 1.0], ...
+    'velocity', [0.5, 2.0, 2.0], ...
+    'acceleration', [0.0, 0.1, -0.05]);
+
+% Trial 4: Ball moving in mixed 3D trajectory
+ball_trajectories{4} = struct(...
+    'start_pos', [2.0, 2.0, 1.0], ...
+    'velocity', [2.0, 2.0, 1.0], ...
+    'acceleration', [0.05, -0.05, 0.0]);
+
+fprintf('✓ Fixed ball trajectories defined for all trials (DETERMINISTIC):\n');
+for trial = 1:min(n_trials, numel(ball_trajectories))
+    fprintf('  Trial %d: start=[%.1f, %.1f, %.1f], v=[%.1f, %.1f, %.1f], a=[%.3f, %.3f, %.3f]\n', ...
+        trial, ...
+        ball_trajectories{trial}.start_pos(1), ball_trajectories{trial}.start_pos(2), ball_trajectories{trial}.start_pos(3), ...
+        ball_trajectories{trial}.velocity(1), ball_trajectories{trial}.velocity(2), ball_trajectories{trial}.velocity(3), ...
+        ball_trajectories{trial}.acceleration(1), ball_trajectories{trial}.acceleration(2), ball_trajectories{trial}.acceleration(3));
 end
-% Optional reachable-set check: ensure player (with kinematic limits) can reach
-% the passing point in time. This is a conservative check assuming player
-% starts from rest at the trial start.
-if nargin > 0 && isstruct(params) && isfield(params, 'ensure_reachable') && params.ensure_reachable
-    ensure_reachable = true;
-    if isfield(params, 'player_max_speed')
-        player_max_speed = params.player_max_speed;
-    else
-        player_max_speed = 2.0;
-    end
-    if isfield(params, 'player_max_accel')
-        player_max_accel = params.player_max_accel;
-    else
-        player_max_accel = 5.0;
-    end
-    if isfield(params, 'reachable_tolerance')
-        reachable_tolerance = params.reachable_tolerance;
-    else
-        reachable_tolerance = 0.05;
-    end
-else
-    ensure_reachable = false;
-end
-
-for trial = 1:n_trials
-    attempts = 0;
-    accepted = false;
-    while ~accepted
-        attempts = attempts + 1;
-        % --- Candidate generation (improved) ---
-        % Strategy: pick a pass time t_pass and pass position near player_start,
-        % then analytically compute the initial velocity v0 that would place the
-        % ball at pass_pos at time t_pass under constant acceleration (including gravity).
-        % This creates candidates that are much more likely to pass near player_start.
-        player_start = initial_positions(trial, :)';
-
-        % pick a start position (random in workspace near center for diversity)
-        start_pos = [ workspace_bounds(1,1) + rand()*(workspace_bounds(1,2)-workspace_bounds(1,1)), ...
-                      workspace_bounds(2,1) + rand()*(workspace_bounds(2,2)-workspace_bounds(2,1)), ...
-                      max(workspace_bounds(3,1), 0) + 0.5 + rand()*2.0 ]; % bias start z above ground
-
-        % default small intrinsic ball acceleration (horizontal jitter); gravity handled separately
-        intrinsic_acc = [0; 0; 0];
-
-        % try directed analytic construction most of the time to improve acceptance
-    % Use configured directed-sampling probability (was accidentally hard-coded)
-    if ensure_opportunity && rand() < opportunity_directed_prob
-            % choose pass time within trial (avoid extremes)
-            min_t = max(0.05, 0.1 * T_per_trial);
-            max_t = max(min_t + 0.05, 0.9 * T_per_trial);
-            t_pass = min_t + rand() * (max_t - min_t);
-
-            % choose pass position as a point within opportunity_radius of player start
-            angle = 2*pi*rand();
-            r = rand() * opportunity_radius;
-            pass_offset_xy = [r*cos(angle); r*sin(angle)];
-            % slight vertical offset to allow flight arc
-            pass_z_offset = (-0.2) + rand()*0.4;
-            pass_pos = player_start + [pass_offset_xy; pass_z_offset];
-
-            % total acceleration acting on ball (intrinsic + gravity)
-            a_total = intrinsic_acc + [0; 0; -gravity];
-
-            % analytic initial velocity required to reach pass_pos at time t_pass:
-            % pass_pos = start_pos + v0 * t_pass + 0.5 * a_total * t_pass^2
-            v0 = (pass_pos - start_pos(:) - 0.5 * a_total * (t_pass^2)) / max(1e-9, t_pass);
-
-            % reject if required speed is unrealistic (keeps candidates feasible)
-            if norm(v0) <= vmax_ball
-                velocity = v0(:)';            % row vector
-                acceleration = intrinsic_acc(:)'; % row vector (gravity applied in pre-sim)
-            else
-                % If the analytically-required v0 is too large, adjust the
-                % start_pos to produce a feasible v0 (<= vmax_ball) rather
-                % than falling back to an arbitrary weak random velocity.
-                % Strategy: place the start_pos along the line from the
-                % pass_pos backwards by distance = vmax_ball * t_pass (so
-                % the initial velocity toward pass_pos has magnitude vmax_ball),
-                % and include the 0.5*a_total*t^2 correction.
-                pass_pos_col = pass_pos(:);
-                a_term = 0.5 * a_total * (t_pass^2);
-                % Desired velocity vector (clamped to vmax_ball) pointing to pass_pos
-                dir_to_pass = pass_pos_col - start_pos(:);
-                nd = norm(dir_to_pass);
-                if nd < 1e-6
-                    unit_dir = [1;0;0];
-                else
-                    unit_dir = dir_to_pass / nd;
-                end
-                v_desired = vmax_ball * unit_dir;
-                % Compute a new start position that would require v_desired
-                new_start_col = pass_pos_col - v_desired * t_pass - a_term;
-                % Clamp to workspace bounds (respect workspace_bounds: columns are [xmin xmax; ymin ymax; zmin zmax])
-                new_start_col(1) = min(max(new_start_col(1), workspace_bounds(1,1)), workspace_bounds(1,2));
-                new_start_col(2) = min(max(new_start_col(2), workspace_bounds(2,1)), workspace_bounds(2,2));
-                new_start_col(3) = min(max(new_start_col(3), workspace_bounds(3,1)), workspace_bounds(3,2));
-                % Assign adjusted start_pos (keep row-vector convention used elsewhere)
-                start_pos = new_start_col(:)';
-                % Ensure adjusted start_pos isn't placed too close to the player start
-                if isstruct(params) && isfield(params, 'min_start_sep')
-                    local_min_sep = params.min_start_sep;
-                else
-                    local_min_sep = 0.5;
-                end
-                if norm(start_pos(:)' - player_start(:)') < local_min_sep
-                    dir_away = (start_pos(:)' - player_start(:)');
-                    ndir = norm(dir_away);
-                    if ndir < 1e-6
-                        dir_away = [1,0,0]; ndir = 1;
-                    end
-                    dir_away = dir_away / ndir;
-                    nudged = player_start(:)' + dir_away * local_min_sep;
-                    % clamp to workspace bounds
-                    nudged(1) = min(max(nudged(1), workspace_bounds(1,1)), workspace_bounds(1,2));
-                    nudged(2) = min(max(nudged(2), workspace_bounds(2,1)), workspace_bounds(2,2));
-                    nudged(3) = min(max(nudged(3), workspace_bounds(3,1)), workspace_bounds(3,2));
-                    start_pos = nudged;
-                    % recompute v0 for nudged start
-                    v0_adj = (pass_pos_col - start_pos(:) - a_term) / max(1e-9, t_pass);
-                    velocity = v0_adj(:)';
-                    % clamp magnitude if necessary
-                    n_v0 = norm(velocity);
-                    if n_v0 > vmax_ball * 1.001
-                        velocity = (velocity / n_v0) * vmax_ball;
-                    end
-                end
-                % Recompute v0 for the adjusted start_pos
-                v0_adj = (pass_pos_col - start_pos(:) - a_term) / max(1e-9, t_pass);
-                % Use the adjusted velocity and intrinsic acceleration
-                velocity = v0_adj(:)';
-                acceleration = intrinsic_acc(:)';
-                % If the adjusted v0 is still slightly above vmax_ball due to
-                % clamping to workspace, clamp its magnitude (maintain direction)
-                n_v0 = norm(velocity);
-                if n_v0 > vmax_ball * 1.001
-                    velocity = (velocity / n_v0) * vmax_ball;
-                end
-            end
-        else
-            % occasional pure-random candidate to preserve diversity
-            velocity = randn(1, 3) * 0.5;
-            acceleration = randn(1, 3) * 0.1;
-        end
-
-        ball_trajectories{trial} = struct('start_pos', start_pos, 'velocity', velocity, 'acceleration', acceleration);
-
-        if ~ensure_opportunity
-            accepted = true;
-        else
-            % simulate a quick forward pass (no collisions) to see min distance to player start
-            player_start = initial_positions(trial, :)';
-            dt_check = dt;
-            n_steps_check = round(T_per_trial / dt_check);
-            x = ball_trajectories{trial}.start_pos(:);
-            v = ball_trajectories{trial}.velocity(:);
-            a = ball_trajectories{trial}.acceleration(:) + [0;0; -gravity];
-            min_d = inf; min_k = 1;
-            % Bounce-aware pre-simulation: include air drag, ground collisions
-            if isstruct(params) && isfield(params, 'ground_z')
-                ground_z = params.ground_z;
-            else
-                ground_z = workspace_bounds(3,1);
-            end
-            min_d = inf; min_k = 1;
-            for kk = 1:n_steps_check
-                % integrate acceleration
-                v = v + a * dt_check;
-                % air drag
-                v = v * (1 - air_drag);
-                % integrate position
-                x = x + v * dt_check;
-                % collision with ground plane (bounce + tangential friction)
-                if x(3) <= ground_z
-                    x(3) = ground_z;
-                    if v(3) < 0
-                        v(3) = -restitution * v(3);
-                    end
-                    % damp tangential components
-                    v(1:2) = v(1:2) * ground_friction;
-                    if abs(v(3)) < 1e-3
-                        v(3) = 0;
-                    end
-                end
-                % clamp to workspace bounds (so rebounds don't escape domain)
-                x(1) = min(max(x(1), workspace_bounds(1,1)), workspace_bounds(1,2));
-                x(2) = min(max(x(2), workspace_bounds(2,1)), workspace_bounds(2,2));
-                x(3) = min(max(x(3), workspace_bounds(3,1)), workspace_bounds(3,2));
-
-                d = norm(x - player_start);
-                if d < min_d
-                    min_d = d;
-                    min_k = kk;
-                end
-            end
-            % geometric opportunity check
-            geom_ok = (~ensure_opportunity) || (min_d <= opportunity_radius);
-            reach_ok = true;
-            if ensure_reachable
-                % available time until passing point (seconds)
-                time_to_pass = (min_k - 1) * dt_check;
-                % conservative reachable distance calculation assuming start from rest
-                t_accel = player_max_speed / max(1e-6, player_max_accel);
-                if time_to_pass <= t_accel
-                    d_max = 0.5 * player_max_accel * (time_to_pass^2);
-                else
-                    d_max = 0.5 * player_max_accel * (t_accel^2) + player_max_speed * (time_to_pass - t_accel);
-                end
-                % allow a small tolerance (meters)
-                reach_ok = (min_d <= d_max + reachable_tolerance);
-            end
-            if geom_ok && reach_ok
-                accepted = true;
-            else
-                accepted = false;
-            end
-        end
-
-        if ~accepted && attempts >= opportunity_max_attempts
-            warning('Could not generate an interceptable trajectory for trial %d after %d attempts; accepting last trajectory.', trial, attempts);
-            accepted = true;
-        end
-    end
-end
+fprintf('\n');
 
 % Ensure ball starts are sufficiently far from player initial positions
 % Default minimum separation (meters)

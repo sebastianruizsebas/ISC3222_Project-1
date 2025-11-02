@@ -22,12 +22,12 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 25;  % Each particle = one parameter set
+num_particles = 40;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 35;  % Each iteration = all particles tested
+num_iterations = 40;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 875 trials
+% Total evaluations will be: num_particles * num_iterations = 1600 trials
 total_evals = num_particles * num_iterations;
 
 fprintf('PSO CONFIGURATION:\n');
@@ -60,7 +60,7 @@ param_bounds.eta_rep.log_max = -1;      % 10^-1 = 0.1
 param_bounds.eta_W.log_min = -6;        % 10^-6 = 0.000001
 param_bounds.eta_W.log_max = -1;        % 10^-1 = 0.1
 param_bounds.momentum.min = 0.70;       % Linear scale
-param_bounds.momentum.max = 0.98;
+param_bounds.momentum.max = 1.0;
 
 % WEIGHT DECAY (linear scale, affects learning across trials)
 param_bounds.weight_decay.min = 0.60;
@@ -77,16 +77,16 @@ param_bounds.decay_plan.max = 0.80;
 % MOTOR DYNAMICS (linear scale, affects trajectory quality)
 param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
 param_bounds.motor_gain.max = 1.0;
-param_bounds.damping.min = 0.70;        % Velocity dampening
-param_bounds.damping.max = 0.99;
-param_bounds.reaching_speed_scale.min = 0.1;  % Scale for initial reaching speed
+param_bounds.damping.min = 0.30;        % Velocity dampening
+param_bounds.damping.max = 0.759;
+param_bounds.reaching_speed_scale.min = 0.7;  % Scale for initial reaching speed
 param_bounds.reaching_speed_scale.max = 1.0;
 
 % WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
-param_bounds.W_motor_gain.min = 0.01;   % Motor weight init gain
+param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
 param_bounds.W_motor_gain.max = 1.0;
-param_bounds.W_plan_gain.min = 0.01;    % Planning weight init gain
-param_bounds.W_plan_gain.max = 1.0;
+param_bounds.W_plan_gain.min = 0.10;    % Planning weight init gain
+param_bounds.W_plan_gain.max = 0.01;
 
 % TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 1, 2025)
 % Interference penalty: encourages task-specific weight specialization
@@ -685,14 +685,15 @@ try
         ps.eta_rep = particles(ip).best_eta_rep;
         ps.eta_W = particles(ip).best_eta_W;
         ps.momentum = particles(ip).best_momentum;
-        ps.decay_L2_goal = particles(ip).best_decay_L2_goal;
-        ps.decay_L1_motor = particles(ip).best_decay_L1_motor;
+        ps.weight_decay = particles(ip).best_weight_decay;
+        ps.decay_motor = particles(ip).best_decay_motor;
+        ps.decay_plan = particles(ip).best_decay_plan;
         ps.motor_gain = particles(ip).best_motor_gain;
         ps.damping = particles(ip).best_damping;
         ps.reaching_speed_scale = particles(ip).best_reaching_speed_scale;
-        ps.W_L2_goal_gain = particles(ip).best_W_L2_goal_gain;
-        ps.W_L1_pos_gain = particles(ip).best_W_L1_pos_gain;
-    ps.weight_decay = particles(ip).best_weight_decay;
+        ps.W_motor_gain = particles(ip).best_W_motor_gain;
+        ps.W_plan_gain = particles(ip).best_W_plan_gain;
+        ps.interference_penalty_weight = particles(ip).best_interference_penalty_weight;
 
         leader_list(k).score = sorted_scores(k);
         leader_list(k).params = ps;

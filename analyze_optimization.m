@@ -1,412 +1,168 @@
-% ANALYZE OPTIMIZATION RESULTS
-% ============================
-%
-% This script loads the results from the parameter optimization search
-% and displays the top 3 best-performing parameter sets.
+%% ANALYZE PSO OPTIMIZATION RESULTS
+% Reads the latest PSO results file and extracts/creates top20 leaderboard
 
-% Clear workspace and command window
-clc;
-clear;
-close all;
+clear all; close all; clc;
 
-fprintf('╔═══════════════════════════════════════════════════════════════╗\n');
-fprintf('║  ANALYSIS OF TOP OPTIMIZATION RESULTS                       ║\n');
-fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
+fprintf('════════════════════════════════════════════════════════════════\n');
+fprintf('PSO RESULTS ANALYZER\n');
+fprintf('════════════════════════════════════════════════════════════════\n\n');
 
-% --- 1. Load PSO top-20 leaderboard (preferred) or fallback to older optimization results ---
-fprintf('Searching for PSO leaderboard (./figures/pso_top20_best_params.mat)...\n');
-leader_file = fullfile('./optimization_results_3D_PSO_2025-10-31_01-06-54.mat');
-% Try to load the preferred PSO leaderboard file, but be defensive: the file
-% may exist but not contain the expected variable name 'leader_list'. If so,
-% fall back to the legacy-results search below.
-if isfile(leader_file)
-    fprintf('Found leaderboard file: %s\n', leader_file);
-    % inspect variables inside the mat file first
-    try
-        vars_in_file = who('-file', leader_file);
-    catch
-        vars_in_file = {};
-    end
-    if ismember('leader_list', vars_in_file)
-        S = load(leader_file, 'leader_list');
-        leader_list = S.leader_list;
-        use_leader_list = true;
-        loaded_mat_filename = leader_file;
-        fprintf('Loaded ''leader_list'' from leaderboard file.\n\n');
-    else
-        fprintf('Leaderboard file exists but does not contain ''leader_list''; falling back to legacy optimization results search.\n\n');
-        use_leader_list = false;
-    end
-else
-    fprintf('Leaderboard file not found, falling back to legacy optimization results in ./optimization_results/...\n');
-    use_leader_list = false;
+% Find the latest optimization_results_3D_PSO_*.mat file
+pso_files = dir('optimization_results_3D_PSO_*.mat');
+if isempty(pso_files)
+    error('No PSO results files found. Run optimize_rao_ballard_pso.m first.');
 end
 
-% If we didn't obtain a leader_list above, search the legacy results folder
-if ~exist('use_leader_list','var') || ~use_leader_list
-    result_files = dir('./optimization_results/rao_ballard_3D_optimization_*.mat');
-    if isempty(result_files)
-        error('No optimization results file or PSO leaderboard found. Please run PSO first.');
-    end
-    [~, latest_idx] = max([result_files.datenum]);
-    results_filename = fullfile(result_files(latest_idx).folder, result_files(latest_idx).name);
-    fprintf('Loading legacy optimization results from: %s\n\n', results_filename);
-    load(results_filename, 'results'); % Loads the 'results' struct
-    loaded_mat_filename = results_filename;
+[~, idx] = sort([pso_files.datenum], 'descend');
+latest_file = pso_files(idx(1));
+pso_filepath = fullfile(latest_file.folder, latest_file.name);
+fprintf('Found latest PSO results: %s\n', latest_file.name);
+fprintf('  File size: %.2f MB\n', latest_file.bytes / 1e6);
+fprintf('  Date: %s\n\n', datestr(latest_file.datenum));
+
+% Load PSO results
+fprintf('Loading PSO results...\n');
+load(pso_filepath, 'results');
+
+fprintf('✓ PSO results loaded\n');
+fprintf('  Best score: %.6f\n', results.best_score);
+fprintf('  Total particles: %d\n', results.num_particles);
+fprintf('  Total iterations: %d\n', results.num_iterations);
+fprintf('  Total evaluations: %d\n\n', results.total_evaluations);
+
+% ====================================================================
+% Extract top20 leaderboard from particles
+% ====================================================================
+fprintf('Extracting top-20 best parameter sets...\n');
+
+if ~isfield(results, 'particles')
+    error('Results structure does not contain particles field.');
 end
 
-% --- Debug: print contents of the loaded MAT file (top-level fields & summaries) ---
-if exist('loaded_mat_filename','var') && isfile(loaded_mat_filename)
-    try
-        fprintf('\n--- Loaded MAT file summary: %s ---\n', loaded_mat_filename);
-        fullS = load(loaded_mat_filename);
-        fns = fieldnames(fullS);
-        for ii = 1:numel(fns)
-            fname = fns{ii};
-            val = fullS.(fname);
-            cls = class(val);
-            sz = mat2str(size(val));
-            fprintf(' * %s : class=%s size=%s\n', fname, cls, sz);
-            % Print small numeric arrays; otherwise print a short summary
-            try
-                if isnumeric(val) || islogical(val)
-                    cnt = numel(val);
-                    if cnt == 0
-                        fprintf('   (empty)\n');
-                    elseif cnt <= 20
-                        fprintf('   values: ');
-                        disp(val);
-                    else
-                        vv = val(isfinite(val));
-                        if isempty(vv)
-                            fprintf('   numeric, but all NaN/Inf or non-finite\n');
-                        else
-                            fprintf('   summary: min=%.6g, max=%.6g, mean=%.6g, n=%d\n', min(vv), max(vv), mean(vv), numel(vv));
-                        end
-                    end
-                elseif ischar(val)
-                    s = val(:)';
-                    s = s(1:min(numel(s),200));
-                    fprintf('   char: "%s"\n', s);
-                elseif isstruct(val)
-                    subf = fieldnames(val);
-                    fprintf('   struct with %d element(s); fields: %s\n', numel(val), strjoin(subf', ', '));
-                    % show first element's small fields
-                    if numel(val) > 0
-                        fn2 = fieldnames(val(1));
-                        for jj = 1:min(6,numel(fn2))
-                            try
-                                v2 = val(1).(fn2{jj});
-                                if isnumeric(v2) && numel(v2) <= 10
-                                    fprintf('     - %s: %s\n', fn2{jj}, mat2str(v2));
-                                end
-                            catch
-                            end
-                        end
-                    end
-                else
-                    fprintf('   (class %s not expanded)\n', cls);
-                end
-            catch
-                fprintf('   (error printing this field)\n');
-            end
-        end
-        fprintf('--- end of MAT summary ---\n\n');
-    catch ME
-        fprintf('Could not print MAT file contents: %s\n', ME.message);
-    end
+particles = results.particles;
+num_particles = length(particles);
+
+% Collect all particle best scores
+all_scores = zeros(num_particles, 1);
+for p = 1:num_particles
+    all_scores(p) = particles(p).best_score;
 end
 
-if use_leader_list
-    % leader_list is a struct array with fields: score, params
-    n_leader = numel(leader_list);
-    num_to_display = min(20, n_leader);
-    if num_to_display == 0
-        fprintf('Leaderboard is empty.\n');
-        return;
-    end
+% Sort by score (ascending = better)
+[sorted_scores, idx] = sort(all_scores, 'ascend');
 
-    fprintf('Displaying Top %d PSO Parameter Sets (from %s):\n', num_to_display, leader_file);
-    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
-    fprintf('%-5s | %-12s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s | %-10s\n', ...
-        'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum', 'decay_L2', 'decay_L1', 'motor_gain', 'damping', 'reach_scale', 'W_L2');
-    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n');
+% Count valid (finite) scores
+valid_mask = isfinite(sorted_scores);
+num_valid = sum(valid_mask);
+fprintf('  Valid (finite) scores: %d / %d\n', num_valid, num_particles);
 
-    for i = 1:num_to_display
-        sc = leader_list(i).score;
-        p = leader_list(i).params;
-        fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f | %-10.4f\n', ...
-            i, sc, p.eta_rep, p.eta_W, p.momentum, p.decay_L2_goal, p.decay_L1_motor, p.motor_gain, p.damping, p.reaching_speed_scale, p.W_L2_goal_gain);
-    end
-    fprintf('════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════\n\n');
-    fprintf('Analysis complete.\n');
-else
-    % Legacy results struct handling (best-effort mapping)
-    if ~isfield(results, 'top20') && ~isfield(results, 'score')
-        % Try to construct a score / params list from results.particles (personal bests)
-        fprintf('Legacy results detected: constructing leaderboard from particles.personal bests...\n');
-        num_particles = numel(results.particles);
-        all_scores = inf(num_particles,1);
-        for pp = 1:num_particles
-            if isfield(results.particles(pp), 'best_score')
-                all_scores(pp) = results.particles(pp).best_score;
-            end
-        end
-        [sorted_scores, sorted_idx] = sort(all_scores, 'ascend');
-        valid_mask = isfinite(sorted_scores);
-        num_to_display = min(20, sum(valid_mask));
-        fprintf('Displaying Top %d (constructed from particles)\n', num_to_display);
-        fprintf('════════════════════════════════════════════════════════════════\n');
-        fprintf('%-5s | %-12s | %-10s | %-10s | %-10s\n', 'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum');
-        fprintf('════════════════════════════════════════════════════════════════\n');
-        for i = 1:num_to_display
-            ip = sorted_idx(i);
-            sc = sorted_scores(i);
-            p = results.particles(ip);
-            fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f\n', i, sc, p.best_eta_rep, p.best_eta_W, p.best_momentum);
-        end
-        fprintf('════════════════════════════════════════════════════════════════\n\n');
-    else
-        % If results.top20 exists (some older scripts), prefer it
-        if isfield(results, 'top20')
-            leader_list = results.top20;
-            n_leader = numel(leader_list);
-            num_to_display = min(20, n_leader);
-            fprintf('Displaying Top %d Parameter Sets (from results.top20):\n', num_to_display);
-            fprintf('════════════════════════════════════════════════════════════════\n');
-            fprintf('%-5s | %-12s | %-10s | %-10s | %-10s\n', 'Rank', 'Score', 'eta_rep', 'eta_W', 'momentum');
-            fprintf('════════════════════════════════════════════════════════════════\n');
-            for i = 1:num_to_display
-                sc = leader_list(i).score;
-                p = leader_list(i).params;
-                fprintf('%-5d | %-12.6f | %-10.6g | %-10.6g | %-10.4f\n', i, sc, p.eta_rep, p.eta_W, p.momentum);
-            end
-            fprintf('════════════════════════════════════════════════════════════════\n\n');
-        else
-            error('Cannot interpret legacy results structure. Please run PSO or convert results.');
-        end
-    end
+% Take top 20 valid scores
+top_n = min(20, num_valid);
+fprintf('  Building top-%d leaderboard...\n\n', top_n);
+
+% Build leader_list structure
+leader_list = struct('score', cell(top_n,1), 'params', cell(top_n,1), ...
+                     'particle_id', cell(top_n,1), 'rank', cell(top_n,1));
+
+for k = 1:top_n
+    ip = idx(k);  % particle index
+    
+    % Create params structure with all 15 parameters
+    ps = struct();
+    ps.eta_rep = particles(ip).best_eta_rep;
+    ps.eta_W = particles(ip).best_eta_W;
+    ps.momentum = particles(ip).best_momentum;
+    ps.weight_decay = particles(ip).best_weight_decay;
+    ps.decay_motor = particles(ip).best_decay_motor;
+    ps.decay_plan = particles(ip).best_decay_plan;
+    ps.motor_gain = particles(ip).best_motor_gain;
+    ps.damping = particles(ip).best_damping;
+    ps.reaching_speed_scale = particles(ip).best_reaching_speed_scale;
+    ps.W_motor_gain = particles(ip).best_W_motor_gain;
+    ps.W_plan_gain = particles(ip).best_W_plan_gain;
+    ps.interference_penalty_weight = particles(ip).best_interference_penalty_weight;
+    
+    % Store in leader_list
+    leader_list(k).score = sorted_scores(k);
+    leader_list(k).params = ps;
+    leader_list(k).particle_id = ip;
+    leader_list(k).rank = k;
 end
 
-% After leader_list exists (use the top entry)
+% ====================================================================
+% Display Top-20 Leaderboard
+% ====================================================================
+fprintf('═══════════════════════════════════════════════════════════════\n');
+fprintf('TOP 20 PARAMETER SETS\n');
+fprintf('═══════════════════════════════════════════════════════════════\n\n');
+
+fprintf('Rank │   Score   │ Particle │ eta_rep  │ eta_W    │ momentum\n');
+fprintf('─────┼───────────┼──────────┼──────────┼──────────┼──────────\n');
+
+for k = 1:top_n
+    fprintf('%4d │ %9.6f │ %8d │ %.6e │ %.6e │ %.6e\n', ...
+        k, leader_list(k).score, leader_list(k).particle_id, ...
+        leader_list(k).params.eta_rep, leader_list(k).params.eta_W, ...
+        leader_list(k).params.momentum);
+end
+
+fprintf('\n');
+
+% ====================================================================
+% Save Top-20 to pso_top20_best_params.mat
+% ====================================================================
+fprintf('Saving top-20 leaderboard...\n');
+
+out_dir = './figures';
+if ~exist(out_dir, 'dir'), mkdir(out_dir); end
+
+save_path = fullfile(out_dir, 'pso_top20_best_params.mat');
+save(save_path, 'leader_list');
+fprintf('✓ Top-20 saved to: %s\n\n', save_path);
+
+% ====================================================================
+% Save best_params for quick access
+% ====================================================================
+fprintf('Saving best parameters...\n');
 best_params = leader_list(1).params;
+best_score = leader_list(1).score;
 
-% -----------------------------
-% Statistical influence analysis
-% -----------------------------
-% Build a unified list of entries (leader_list or legacy results.particles)
-if exist('leader_list','var') && ~isempty(leader_list)
-    entries = leader_list;
-elseif exist('results','var') && isfield(results, 'particles')
-    % Construct entries from particles' personal bests
-    np = numel(results.particles);
-    entries = repmat(struct('score', [], 'params', struct()), np, 1);
-    for k = 1:np
-        p = results.particles(k);
-        entries(k).score = NaN;
-        if isfield(p, 'best_score'), entries(k).score = p.best_score; end
-        params = struct();
-        if isfield(p, 'best_eta_rep'), params.eta_rep = p.best_eta_rep; end
-        if isfield(p, 'best_eta_W'), params.eta_W = p.best_eta_W; end
-        if isfield(p, 'best_momentum'), params.momentum = p.best_momentum; end
-        % fallback names
-        if isfield(p, 'best_decay_L2_goal'), params.decay_L2_goal = p.best_decay_L2_goal; end
-        if isfield(p, 'best_decay_L1_motor'), params.decay_L1_motor = p.best_decay_L1_motor; end
-        if isfield(p, 'best_motor_gain'), params.motor_gain = p.best_motor_gain; end
-        if isfield(p, 'best_damping'), params.damping = p.best_damping; end
-        if isfield(p, 'best_reaching_speed_scale'), params.reaching_speed_scale = p.best_reaching_speed_scale; end
-        if isfield(p, 'best_W_L2_goal_gain'), params.W_L2_goal_gain = p.best_W_L2_goal_gain; end
-        if isfield(p, 'best_W_L1_pos_gain'), params.W_L1_pos_gain = p.best_W_L1_pos_gain; end
-        if isfield(p, 'best_weight_decay'), params.weight_decay = p.best_weight_decay; end
-        entries(k).params = params;
-    end
-else
-    error('No usable leaderboard or legacy particles found for statistical analysis.');
-end
+save_path_best = fullfile(out_dir, 'pso_best_params.mat');
+save(save_path_best, 'best_params', 'best_score');
+fprintf('✓ Best params saved to: %s\n\n', save_path_best);
 
-% Candidate parameter names to analyze (common set)
-param_names = {'eta_rep','eta_W','momentum','decay_L2_goal','decay_L1_motor','motor_gain','damping','reaching_speed_scale','W_L2_goal_gain','W_L1_pos_gain','weight_decay'};
-N = numel(entries);
-M = numel(param_names);
-X = nan(N, M);
-Y = nan(N, 1);
+% ====================================================================
+% Summary Statistics
+% ====================================================================
+fprintf('═══════════════════════════════════════════════════════════════\n');
+fprintf('SUMMARY STATISTICS\n');
+fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
-% helper to try multiple possible field name variants
-function v = get_field_safe(s, names)
-    v = NaN;
-    for ii = 1:numel(names)
-        if isfield(s, names{ii})
-            v = s.(names{ii}); return;
-        end
-    end
-end
+fprintf('Score Statistics:\n');
+fprintf('  Best (Top-1):    %.6f\n', leader_list(1).score);
+fprintf('  Top-5 mean:      %.6f\n', mean([leader_list(1:5).score]));
+fprintf('  Top-10 mean:     %.6f\n', mean([leader_list(1:10).score]));
+fprintf('  Top-20 mean:     %.6f\n', mean([leader_list(1:top_n).score]));
 
-for i = 1:N
-    if isfield(entries(i), 'score') && ~isempty(entries(i).score)
-        Y(i) = entries(i).score;
-    end
-    p = entries(i).params;
-    % try canonical mappings and fallbacks
-    X(i,1) = get_field_safe(p, {'eta_rep','best_eta_rep'});
-    X(i,2) = get_field_safe(p, {'eta_W','best_eta_W'});
-    X(i,3) = get_field_safe(p, {'momentum','best_momentum'});
-    X(i,4) = get_field_safe(p, {'decay_L2_goal','decay_L2','best_decay_L2_goal'});
-    X(i,5) = get_field_safe(p, {'decay_L1_motor','decay_L1','best_decay_L1_motor'});
-    X(i,6) = get_field_safe(p, {'motor_gain','best_motor_gain'});
-    X(i,7) = get_field_safe(p, {'damping','best_damping'});
-    X(i,8) = get_field_safe(p, {'reaching_speed_scale','reach_scale','best_reaching_speed_scale'});
-    X(i,9) = get_field_safe(p, {'W_L2_goal_gain','W_L2','best_W_L2_goal_gain'});
-    X(i,10)= get_field_safe(p, {'W_L1_pos_gain','W_L1','best_W_L1_pos_gain'});
-    X(i,11)= get_field_safe(p, {'weight_decay','best_weight_decay'});
-end
+fprintf('\nTop-1 Parameters:\n');
+fprintf('  eta_rep:                   %.6e\n', best_params.eta_rep);
+fprintf('  eta_W:                     %.6e\n', best_params.eta_W);
+fprintf('  momentum:                  %.6e\n', best_params.momentum);
+fprintf('  weight_decay:              %.6e\n', best_params.weight_decay);
+fprintf('  decay_motor:               %.6e\n', best_params.decay_motor);
+fprintf('  decay_plan:                %.6e\n', best_params.decay_plan);
+fprintf('  motor_gain:                %.6e\n', best_params.motor_gain);
+fprintf('  damping:                   %.6e\n', best_params.damping);
+fprintf('  reaching_speed_scale:      %.6e\n', best_params.reaching_speed_scale);
+fprintf('  W_motor_gain:              %.6e\n', best_params.W_motor_gain);
+fprintf('  W_plan_gain:               %.6e\n', best_params.W_plan_gain);
+fprintf('  interference_penalty_weight: %.6e\n', best_params.interference_penalty_weight);
 
-valid_rows = isfinite(Y);
-if sum(valid_rows) < 3
-    warning('Not enough valid scored entries (%d) for statistical analysis.', sum(valid_rows));
-else
-    % Compute Pearson correlation for each parameter vs score
-    corrs = nan(M,1);
-    for j = 1:M
-        xv = X(valid_rows,j);
-        yv = Y(valid_rows);
-        ok = isfinite(xv) & isfinite(yv);
-        if sum(ok) >= 3 && std(xv(ok)) > 0
-            R = corrcoef(xv(ok), yv(ok)); corrs(j) = R(1,2);
-        else
-            corrs(j) = NaN;
-        end
-    end
+fprintf('\n════════════════════════════════════════════════════════════════\n');
+fprintf('✓ Analysis complete!\n');
+fprintf('════════════════════════════════════════════════════════════════\n\n');
 
-    [~, idx_sorted] = sort(abs(corrs), 'descend', 'MissingPlacement', 'last');
-    fprintf('\nParameter correlation with score (top 5):\n');
-    for k = 1:min(5, M)
-        j = idx_sorted(k);
-        fprintf('  %2d) %-18s : corr = % .4f\n', k, param_names{j}, corrs(j));
-    end
-
-    % Pairwise linear model R^2 for all parameter pairs
-    pairs = nchoosek(1:M,2);
-    R2_pairs = nan(size(pairs,1),1);
-    for pi = 1:size(pairs,1)
-        a = pairs(pi,1); b = pairs(pi,2);
-        xv = X(valid_rows,[a b]); yv = Y(valid_rows);
-        ok = all(isfinite(xv),2) & isfinite(yv);
-        if sum(ok) >= 4
-            Xreg = [ones(sum(ok),1), xv(ok,1), xv(ok,2)];
-            beta = Xreg \ yv(ok);
-            yhat = Xreg * beta;
-            ssres = sum((yv(ok) - yhat).^2);
-            sst = sum((yv(ok) - mean(yv(ok))).^2);
-            R2_pairs(pi) = 1 - ssres / max(sst, eps);
-        else
-            R2_pairs(pi) = NaN;
-        end
-    end
-
-    [bestR2, bestIdx] = max(R2_pairs);
-    if ~isfinite(bestR2)
-        fprintf('\nPairwise R^2 analysis: insufficient data to evaluate pairs.\n');
-    else
-        best_pair = pairs(bestIdx,:);
-        fprintf('\nTop parameter pair by linear R^2 (explained variance):\n');
-        fprintf('  %s + %s -> R^2 = %.4f\n', param_names{best_pair(1)}, param_names{best_pair(2)}, bestR2);
-        % Show top 5 pairs
-        [sortedR2, sidx] = sort(R2_pairs, 'descend', 'MissingPlacement', 'last');
-        fprintf('\nTop 5 parameter pairs by R^2:\n');
-        for k = 1:min(5, numel(sortedR2))
-            if ~isfinite(sortedR2(k)), break; end
-            pr = pairs(sidx(k),:);
-            fprintf('  %d) %s + %s : R^2 = %.4f\n', k, param_names{pr(1)}, param_names{pr(2)}, sortedR2(k));
-        end
-    end
-
-    % Save influence summary for later inspection
-    out_dir = './figures'; if ~exist(out_dir,'dir'), mkdir(out_dir); end
-    save(fullfile(out_dir,'pso_parameter_influence.mat'), 'param_names', 'corrs', 'pairs', 'R2_pairs');
-    fprintf('\nSaved parameter influence summary to ./figures/pso_parameter_influence.mat\n');
-end
-
-% --- Create a 3D surface visualization for the top parameter pair (score as height) ---
-try
-    if exist('best_pair','var') && exist('bestR2','var') && isfinite(bestR2)
-        a = best_pair(1); b = best_pair(2);
-        % Use only rows with finite score and parameter values
-        vr = valid_rows;
-        pa = X(vr,a); pb = X(vr,b); ps = Y(vr);
-        ok = isfinite(pa) & isfinite(pb) & isfinite(ps);
-        if sum(ok) >= 6
-            % Build grid and interpolate scattered scores onto it
-            na = max(20, ceil(sqrt(sum(ok))*2)); nb = na;
-            xa = linspace(min(pa(ok)), max(pa(ok)), na);
-            xb = linspace(min(pb(ok)), max(pb(ok)), nb);
-            [XA, XB] = meshgrid(xa, xb);
-            % Prefer scatteredInterpolant; fallback to griddata
-            try
-                F = scatteredInterpolant(pa(ok), pb(ok), ps(ok), 'natural', 'none');
-                Z = F(XA, XB);
-                if all(isnan(Z),'all')
-                    Z = griddata(pa(ok), pb(ok), ps(ok), XA, XB, 'linear');
-                end
-            catch
-                Z = griddata(pa(ok), pb(ok), ps(ok), XA, XB, 'linear');
-            end
-
-            % If interpolation produced NaNs in regions, try a smoother fill using nearest
-            if any(isnan(Z),'all')
-                Zn = Z;
-                nanidx = isnan(Z);
-                if any(nanidx,'all')
-                    Zn(nanidx) = griddata(pa(ok), pb(ok), ps(ok), XA(nanidx), XB(nanidx), 'nearest');
-                    Z = Zn;
-                end
-            end
-
-            % Create figure and plot
-            hFig = figure('Name','PSO score surface','NumberTitle','off');
-            surf(XA, XB, Z, 'EdgeColor','none'); hold on;
-            scatter3(pa(ok), pb(ok), ps(ok), 40, 'k', 'filled');
-            xlabel(param_names{a}, 'Interpreter', 'none');
-            ylabel(param_names{b}, 'Interpreter', 'none');
-            zlabel('Score');
-            title(sprintf('PSO score surface: %s vs %s (pair R^2 = %.3f)', param_names{a}, param_names{b}, bestR2), 'Interpreter', 'none');
-            colorbar; view(45,30); grid on; shading interp;
-
-            % Save to figures
-            out_dir = './figures'; if ~exist(out_dir,'dir'), mkdir(out_dir); end
-            safeA = matlab.lang.makeValidName(param_names{a});
-            safeB = matlab.lang.makeValidName(param_names{b});
-            outfn = fullfile(out_dir, sprintf('pso_score_surface_%s_%s.png', safeA, safeB));
-            try
-                saveas(hFig, outfn);
-                fprintf('Saved pairwise surface plot to %s\n', outfn);
-            catch
-                fprintf('Could not save surface plot to %s (saveas failed)\n', outfn);
-            end
-        else
-            fprintf('Not enough finite points (%d) to build surface for the top pair (%s + %s).\n', sum(ok), param_names{a}, param_names{b});
-        end
-    else
-        fprintf('Top parameter pair or R^2 not available; skipping surface visualization.\n');
-    end
-catch ME
-    fprintf('Error while creating pairwise surface plot: %s\n', ME.message);
-end
-
-
-% Map to main function names if desired (optional)
-params_to_run = struct( ...
-    'eta_rep', best_params.eta_rep, ...
-    'eta_W', best_params.eta_W, ...
-    'momentum', best_params.momentum, ...
-    'decay_plan', best_params.decay_L2_goal, ...
-    'decay_motor', best_params.decay_L1_motor, ...
-    'motor_gain', best_params.motor_gain, ...
-    'damping', best_params.damping, ...
-    'reaching_speed_scale', best_params.reaching_speed_scale, ...
-    'W_plan_gain', best_params.W_L2_goal_gain, ...
-    'W_motor_gain', best_params.W_L1_pos_gain, ...
-    'save_results', true ...
-);
-
-save(fullfile('./figures','pso_best_params.mat'),'params_to_run');
-fprintf('Saved best params to ./figures/pso_best_params.mat\n');
+fprintf('Next steps:\n');
+fprintf('  1. Run load_best_pso_and_run.m to test best parameters\n');
+fprintf('  2. Or manually use best_params from pso_best_params.mat\n');
+fprintf('  3. Access top20 from figures/pso_top20_best_params.mat\n\n');
