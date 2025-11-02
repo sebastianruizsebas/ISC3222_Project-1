@@ -50,12 +50,12 @@ noise_scale = 0.1;  % Noise scale for stochastic perturbations (10% of parameter
 param_bounds = struct();
 
 % LEARNING RATES (log scale)
-param_bounds.eta_rep.log_min = -4;      % 10^-4 = 0.0001
-param_bounds.eta_rep.log_max = -1;      % 10^-1 = 0.1
-param_bounds.eta_W.log_min = -6;        % 10^-6 = 0.000001
-param_bounds.eta_W.log_max = -1;        % 10^-1 = 0.1
+param_bounds.eta_rep.log_min = -5;      % 10^-5 = 0.00001
+param_bounds.eta_rep.log_max = -3;      % 10^-3 = 0.001
+param_bounds.eta_W.log_min = -7;        % 10^-7 = 0.0000001
+param_bounds.eta_W.log_max = -5;        % 10^-5 = 0.00001
 param_bounds.momentum.min = 0.70;       % Linear scale
-param_bounds.momentum.max = 1.0;
+param_bounds.momentum.max = 0.95;
 
 % WEIGHT DECAY (linear scale, affects learning across trials)
 param_bounds.weight_decay.min = 0.60;
@@ -70,7 +70,7 @@ param_bounds.decay_plan.min = 0.50;     % Planning: 50-80% weight retention
 param_bounds.decay_plan.max = 0.85;
 
 % MOTOR DYNAMICS (linear scale, affects trajectory quality)
-param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
+param_bounds.motor_gain.min = 0.25;      % Initial motor command strength
 param_bounds.motor_gain.max = 1.0;
 param_bounds.damping.min = 0.30;        % Velocity dampening
 param_bounds.damping.max = 0.759;
@@ -81,7 +81,7 @@ param_bounds.reaching_speed_scale.max = 2.0;
 param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
 param_bounds.W_motor_gain.max = 1.0;
 param_bounds.W_plan_gain.min = 0.01;    % Planning weight init gain
-param_bounds.W_plan_gain.max = 0.10;
+param_bounds.W_plan_gain.max = 0.70;
 
 % TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 1, 2025)
 % Interference penalty: encourages task-specific weight specialization
@@ -91,29 +91,29 @@ param_bounds.interference_penalty_weight.max = 0.1;   % Max cross-task error pen
 % ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025)
 % Prediction-error-driven precision: precision = precision_old * exp(alpha * error)
 % Higher sensitivity (alpha) → precision responds more aggressively to errors
-param_bounds.alpha_precision_gain.min = 0.1;      % Low sensitivity (smooth adaptation)
+param_bounds.alpha_precision_gain.min = 0.5;      % Low sensitivity (smooth adaptation)
 param_bounds.alpha_precision_gain.max = 2.0;      % High sensitivity (sharp adaptation)
 
 % Precision bounds for L1 motor (proprioceptive / sensory level)
 % High precision = tighter constraints on proprioceptive predictions
 % NOTE: min values are hard-coded in main script (10, 1, 10, 1), only max values are optimized
-param_bounds.pi_L1_motor_max.min = 200;           % Minimum upper bound
-param_bounds.pi_L1_motor_max.max = 1000;          % Maximum upper bound
+param_bounds.pi_L1_motor_max.min = 150;           % Minimum upper bound
+param_bounds.pi_L1_motor_max.max = 400;          % Maximum upper bound
 
 % Precision bounds for L2 motor (intermediate basis functions)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L2_motor_max.min = 20;
+param_bounds.pi_L2_motor_max.min = 30;
 param_bounds.pi_L2_motor_max.max = 200;
 
 % Precision bounds for L1 plan (goal/target representation)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L1_plan_max.min = 100;
-param_bounds.pi_L1_plan_max.max = 500;
+param_bounds.pi_L1_plan_max.min = 80;
+param_bounds.pi_L1_plan_max.max = 450;
 
 % Precision bounds for L2 plan (planning policies)
 % NOTE: min values are hard-coded in main script, only max values are optimized
 param_bounds.pi_L2_plan_max.min = 20;
-param_bounds.pi_L2_plan_max.max = 100;
+param_bounds.pi_L2_plan_max.max = 150;
 
 % Objective function weights
 % For 3D reaching, primary metric is reaching distance improvement
