@@ -302,40 +302,28 @@ if nargin > 0 && isstruct(params)
     else
         alpha_precision_gain = 0.5;  % Default sensitivity to error magnitude
     end
-    if isfield(params, 'pi_L1_motor_min')
-        pi_L1_motor_min = params.pi_L1_motor_min;
-    else
-        pi_L1_motor_min = 10;   % Minimum precision (allow exploration)
-    end
+    
+    % Hard-coded minimum precision values (NOT optimized by PSO)
+    pi_L1_motor_min = 10;   % Fixed minimum precision (allow exploration)
+    pi_L2_motor_min = 1;    % Fixed minimum precision
+    pi_L1_plan_min = 10;    % Fixed minimum precision
+    pi_L2_plan_min = 1;     % Fixed minimum precision
+    
+    % Read maximum precision values from PSO (optimized)
     if isfield(params, 'pi_L1_motor_max')
         pi_L1_motor_max = params.pi_L1_motor_max;
     else
-        pi_L1_motor_max = 500;  % Maximum precision (tight bounds)
-    end
-    if isfield(params, 'pi_L2_motor_min')
-        pi_L2_motor_min = params.pi_L2_motor_min;
-    else
-        pi_L2_motor_min = 1;
+        pi_L1_motor_max = 500;  % Default maximum precision (tight bounds)
     end
     if isfield(params, 'pi_L2_motor_max')
         pi_L2_motor_max = params.pi_L2_motor_max;
     else
         pi_L2_motor_max = 100;
     end
-    if isfield(params, 'pi_L1_plan_min')
-        pi_L1_plan_min = params.pi_L1_plan_min;
-    else
-        pi_L1_plan_min = 10;
-    end
     if isfield(params, 'pi_L1_plan_max')
         pi_L1_plan_max = params.pi_L1_plan_max;
     else
         pi_L1_plan_max = 500;
-    end
-    if isfield(params, 'pi_L2_plan_min')
-        pi_L2_plan_min = params.pi_L2_plan_min;
-    else
-        pi_L2_plan_min = 1;
     end
     if isfield(params, 'pi_L2_plan_max')
         pi_L2_plan_max = params.pi_L2_plan_max;
@@ -345,6 +333,7 @@ if nargin > 0 && isstruct(params)
 else
     % Defaults (no PSO optimization)
     alpha_precision_gain = 0.5;
+    % Hard-coded minimums
     pi_L1_motor_min = 10;    pi_L1_motor_max = 500;
     pi_L2_motor_min = 1;     pi_L2_motor_max = 100;
     pi_L1_plan_min = 10;     pi_L1_plan_max = 500;
