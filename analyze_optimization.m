@@ -8,7 +8,7 @@ fprintf('PSO RESULTS ANALYZER\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
 
 % Find the latest optimization_results_3D_PSO_*.mat file
-pso_files = dir('optimization_results_3D_PSO_2025-11-02_01-30-25.mat');
+pso_files = dir('./optimization_results_3D_PSO_2025-11-02_02-45-43.mat');
 if isempty(pso_files)
     error('No PSO results files found. Run optimize_rao_ballard_pso.m first.');
 end
@@ -67,7 +67,7 @@ leader_list = struct('score', cell(top_n,1), 'params', cell(top_n,1), ...
 for k = 1:top_n
     ip = idx(k);  % particle index
     
-    % Create params structure with all 15 parameters
+    % Create params structure with all 20 parameters
     ps = struct();
     ps.eta_rep = particles(ip).best_eta_rep;
     ps.eta_W = particles(ip).best_eta_W;
@@ -81,6 +81,35 @@ for k = 1:top_n
     ps.W_motor_gain = particles(ip).best_W_motor_gain;
     ps.W_plan_gain = particles(ip).best_W_plan_gain;
     ps.interference_penalty_weight = particles(ip).best_interference_penalty_weight;
+    
+    % Add precision parameters if they exist (may not be in older particle records)
+    if isfield(particles(ip), 'best_alpha_precision_gain')
+        ps.alpha_precision_gain = particles(ip).best_alpha_precision_gain;
+    end
+    if isfield(particles(ip), 'best_pi_L1_motor_min')
+        ps.pi_L1_motor_min = particles(ip).best_pi_L1_motor_min;
+    end
+    if isfield(particles(ip), 'best_pi_L1_motor_max')
+        ps.pi_L1_motor_max = particles(ip).best_pi_L1_motor_max;
+    end
+    if isfield(particles(ip), 'best_pi_L2_motor_min')
+        ps.pi_L2_motor_min = particles(ip).best_pi_L2_motor_min;
+    end
+    if isfield(particles(ip), 'best_pi_L2_motor_max')
+        ps.pi_L2_motor_max = particles(ip).best_pi_L2_motor_max;
+    end
+    if isfield(particles(ip), 'best_pi_L1_plan_min')
+        ps.pi_L1_plan_min = particles(ip).best_pi_L1_plan_min;
+    end
+    if isfield(particles(ip), 'best_pi_L1_plan_max')
+        ps.pi_L1_plan_max = particles(ip).best_pi_L1_plan_max;
+    end
+    if isfield(particles(ip), 'best_pi_L2_plan_min')
+        ps.pi_L2_plan_min = particles(ip).best_pi_L2_plan_min;
+    end
+    if isfield(particles(ip), 'best_pi_L2_plan_max')
+        ps.pi_L2_plan_max = particles(ip).best_pi_L2_plan_max;
+    end
     
     % Store in leader_list
     leader_list(k).score = sorted_scores(k);

@@ -17,7 +17,7 @@ script_dir = fileparts(mfilename('fullpath'));
 project_root = fileparts(script_dir);
 
 if nargin < 1 || isempty(pso_file)
-    pso_file = fullfile(project_root, 'tools/figures/pso_best_params.mat');
+    pso_file = fullfile(project_root, 'tools/figures/pso_top20_best_params.mat');
 end
 
 if nargin < 2 || isempty(idx)
@@ -33,9 +33,8 @@ end
 
 candidate_files = {
     pso_file;
+    fullfile(project_root, 'figures', 'pso_top20_best_params.mat');
     fullfile(project_root, 'figures', 'optimization_results_3D_PSO_*.mat');
-    fullfile(project_root, 'figures', '3D_dual_hierarchy_results_best.mat');
-    fullfile(project_root, 'figures', 'pso_*.mat');
 };
 
 loaded = struct();
@@ -60,9 +59,10 @@ for cf_idx = 1:numel(candidate_files)
         try
             loaded = load(cf);
             loaded_file = cf;
-            fprintf('Successfully loaded PSO results: %s\n', cf);
+            fprintf('✓ Successfully loaded PSO results: %s\n', cf);
             break;
         catch
+            fprintf('  (could not load %s)\n', cf);
             continue;
         end
     end
@@ -148,13 +148,38 @@ end
 if isempty(fieldnames(params))
     fprintf('Warning: Could not find parameters in standard locations, scanning file...\n');
     vars = fieldnames(loaded);
+    fprintf('Available fields in loaded file:\n');
+    for k = 1:numel(vars)
+        v = loaded.(vars{k});
+        if isstruct(v)
+            fprintf('  - %s (struct with %d element(s))\n', vars{k}, numel(v));
+        elseif iscell(v)
+            fprintf('  - %s (cell with %d element(s))\n', vars{k}, numel(v));
+        elseif isnumeric(v)
+            fprintf('  - %s (numeric: %s)\n', vars{k}, mat2str(size(v)));
+        else
+            fprintf('  - %s (%s)\n', vars{k}, class(v));
+        end
+    end
+    
+    % More detailed scanning
     for k = 1:numel(vars)
         v = loaded.(vars{k});
         if isstruct(v) && numel(v) > 0
-            % Check if this looks like a parameter set (has eta_rep, eta_W, etc.)
-            if isfield(v(1), 'eta_rep') || isfield(v(1), 'eta_W') || isfield(v(1), 'momentum')
-                params = v(1);
-                fprintf('Found parameters in field: %s\n', vars{k});
+            % Check if this looks like a parameter set
+            v_test = v(1);
+            param_fields = {'eta_rep', 'eta_W', 'momentum', 'decay_motor', 'decay_plan', ...
+                           'motor_gain', 'damping', 'reaching_speed_scale', 'W_plan_gain', 'W_motor_gain'};
+            param_count = sum(isfield(v_test, param_fields));
+            
+            if param_count >= 3
+                fprintf('  ✓ Found %d learning parameters in field: %s\n', param_count, vars{k});
+                if idx > numel(v)
+                    fprintf('    Warning: idx=%d exceeds array length %d, using first element\n', idx, numel(v));
+                    params = v(1);
+                else
+                    params = v(idx);
+                end
                 break;
             end
         end
@@ -162,8 +187,11 @@ if isempty(fieldnames(params))
 end
 
 if isempty(fieldnames(params))
+    fprintf('\n❌ DIAGNOSTIC: Could not extract parameters from %s\n', loaded_file);
+    fprintf('This file appears to be model outputs, not PSO results.\n');
+    fprintf('Expected file: pso_top20_best_params.mat or optimization_results_3D_PSO_*.mat\n');
     error(['Could not extract parameters from %s.\n' ...
-        'Expected structure: results.top20[idx].params or best_particle'], loaded_file);
+        'Expected file format: PSO results with leader_list or results.particles'], loaded_file);
 end
 
 % ====================================================================

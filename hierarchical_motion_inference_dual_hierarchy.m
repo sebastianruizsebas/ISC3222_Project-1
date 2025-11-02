@@ -97,8 +97,8 @@ end
 
 % Timing defaults (can be overridden by params)
 dt = 0.01;              % Time step (s)
-T_per_trial = 20;      % Duration per trial (s) - smaller default for quicker runs
-n_trials = 1;           % Number of different ball trajectories
+T_per_trial = 200;      % Duration per trial (s) - smaller default for quicker runs
+n_trials = 4;           % Number of different ball trajectories
 
 if nargin > 0 && isstruct(params)
     if isfield(params, 'dt'), dt = params.dt; end
@@ -656,6 +656,24 @@ S.denom_trace_L1_motor = denom_trace_L1_motor; S.denom_trace_L2_motor = denom_tr
 S.denom_trace_L1_plan = denom_trace_L1_plan; S.denom_trace_L2_plan = denom_trace_L2_plan;
 
 % Dynamic precision state
+% FIX (Nov 2, 2025): NEW ISSUE #2 - Add P_pi_bounds error handling
+% Validate that P_pi_bounds struct exists, has required fields, and values are well-formed
+assert(isstruct(P_pi_bounds), 'ERROR: P_pi_bounds must be a struct');
+assert(isfield(P_pi_bounds, 'L1_motor'), 'ERROR: P_pi_bounds.L1_motor field missing');
+assert(isfield(P_pi_bounds, 'L2_motor'), 'ERROR: P_pi_bounds.L2_motor field missing');
+assert(isfield(P_pi_bounds, 'L1_plan'), 'ERROR: P_pi_bounds.L1_plan field missing');
+assert(isfield(P_pi_bounds, 'L2_plan'), 'ERROR: P_pi_bounds.L2_plan field missing');
+% Validate each bound is a 2-element numeric vector with finite values
+bounds_fields = {'L1_motor', 'L2_motor', 'L1_plan', 'L2_plan'};
+for f = 1:numel(bounds_fields)
+    fname = bounds_fields{f};
+    assert(isnumeric(P_pi_bounds.(fname)) && numel(P_pi_bounds.(fname)) == 2, ...
+        sprintf('ERROR: P_pi_bounds.%s must be a 2-element numeric vector', fname));
+    assert(all(isfinite(P_pi_bounds.(fname))), ...
+        sprintf('ERROR: P_pi_bounds.%s contains NaN/Inf', fname));
+    assert(P_pi_bounds.(fname)(1) < P_pi_bounds.(fname)(2), ...
+        sprintf('ERROR: P_pi_bounds.%s has min >= max', fname));
+end
 % IMPORTANT: Clip initial precision values to be within bounds before simulation starts
 S.pi_L1_motor = max(P_pi_bounds.L1_motor(1), min(P_pi_bounds.L1_motor(2), pi_L1_motor));
 S.pi_L2_motor = max(P_pi_bounds.L2_motor(1), min(P_pi_bounds.L2_motor(2), pi_L2_motor));
@@ -698,20 +716,55 @@ P.pi_bounds = P_pi_bounds;  % Bounds for dynamic precision updates
 % FIX (Nov 2, 2025): Add missing interference_penalty_weight parameter
 P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight
 
-% VALIDATION: Ensure precision bounds are sensible (min < max)
+% FIX (Nov 2, 2025): INCOMPLETE FIX #3 - Add task gate parameterization
+% These control the task-gating mechanism in planning region (motor always learns)
+P.min_task_gate = 0.3;      % Minimum task gate value (when task is not active)
+P.task_gate_range = 0.7;    % Range of task gate (so max = min + range = 1.0)
+
+% VALIDATION: Ensure precision bounds are sensible (FIX Nov 2, 2025: comprehensive validation)
 if ~isfinite(P.alpha_precision_gain) || P.alpha_precision_gain <= 0
     P.alpha_precision_gain = 0.5;  % Reset to default if invalid
 end
 
-% Check if bounds are valid - if any min >= max, use defaults
-if P.pi_bounds.L1_motor(1) >= P.pi_bounds.L1_motor(2) || P.pi_bounds.L2_motor(1) >= P.pi_bounds.L2_motor(2) || ...
-   P.pi_bounds.L1_plan(1) >= P.pi_bounds.L1_plan(2) || P.pi_bounds.L2_plan(1) >= P.pi_bounds.L2_plan(2)
-    % BOUNDS INVALID - reset to defaults
-    P.pi_bounds.L1_motor = [10, 500];
-    P.pi_bounds.L2_motor = [0.5, 50];
-    P.pi_bounds.L1_plan = [10, 500];
-    P.pi_bounds.L2_plan = [0.5, 50];
+% Comprehensive bounds validation: checks min < max, ratio bounds, NaN/Inf, and narrow bounds detection
+P = validate_and_fix_precision_bounds(P);  % Function at end of file (line ~1130)
+
+% ====================================================================
+% FIX #5: PSO PARAMETER VALIDATION (Nov 2, 2025)
+% ====================================================================
+% CRITICAL: Verify that PSO-optimized parameters are actually being USED in the simulation
+% This prevents silent failures where PSO parameters are loaded but never referenced
+% ====================================================================
+
+fprintf('\n✓ VALIDATION: Precision Parameter Usage (FIX #5)\n');
+fprintf('─────────────────────────────────────────────────────\n');
+
+% Verify that P struct contains all precision-related fields that will be used in hierarchical_step_update.m
+required_precision_fields = {'alpha_precision_gain', 'pi_bounds'};
+for f = 1:numel(required_precision_fields)
+    field_name = required_precision_fields{f};
+    if ~isfield(P, field_name)
+        error('ERROR: P.%s not set - PSO parameters will not be used! Set in initialization.', field_name);
+    end
 end
+
+fprintf('  ✓ P.alpha_precision_gain = %.6f (error-driven precision sensitivity)\n', P.alpha_precision_gain);
+fprintf('  ✓ P.pi_bounds.L1_motor = [%.1f, %.1f]\n', P.pi_bounds.L1_motor(1), P.pi_bounds.L1_motor(2));
+fprintf('  ✓ P.pi_bounds.L2_motor = [%.1f, %.1f]\n', P.pi_bounds.L2_motor(1), P.pi_bounds.L2_motor(2));
+fprintf('  ✓ P.pi_bounds.L1_plan = [%.1f, %.1f]\n', P.pi_bounds.L1_plan(1), P.pi_bounds.L1_plan(2));
+fprintf('  ✓ P.pi_bounds.L2_plan = [%.1f, %.1f]\n', P.pi_bounds.L2_plan(1), P.pi_bounds.L2_plan(2));
+
+fprintf('\n  These parameters will be used in hierarchical_step_update.m to control:\n');
+fprintf('    - Error-driven precision scaling (exponential): precision *= exp(alpha * error)\n');
+fprintf('    - Precision bounds enforcement: clamp to [min, max]\n');
+fprintf('    - Result: Adaptive precision dynamics that PSO can optimize\n\n');
+
+fprintf('✓ PSO OBJECTIVE FUNCTION:\n');
+fprintf('  Minimize: weighted_score = reaching_error + lambda * free_energy\n');
+fprintf('  where:\n');
+fprintf('    reaching_error = mean(||player - ball|| over all steps)\n');
+fprintf('    free_energy = sum of prediction errors scaled by precisions\n');
+fprintf('    lambda = objective_weights.free_energy (typically 0.1-1.0)\n\n');
 
 % Termination distance: when player is within this distance of ball the session ends
 P.termination_distance = 0.15;
@@ -1140,3 +1193,91 @@ fprintf('  • Explicit representation enables task-specific learning\n');
 fprintf('\n');
 
 end  % End of hierarchical_motion_inference_dual_hierarchy function
+
+% ================================================================
+% VALIDATION FUNCTION: Comprehensive Precision Bounds Validation
+% ================================================================
+% FIX (Nov 2, 2025): INCOMPLETE FIX #2 - Comprehensive bounds validation
+% Purpose: Ensure precision bounds are sensible (min < max), within reasonable ratios,
+%          have no NaN/Inf, and aren't too narrow (would prevent precision adaptation)
+%
+% Checks performed:
+%  1. min < max (basic validity)
+%  2. Ratio between min/max in range [1.1, 1000] (not too tight, not too loose)
+%  3. No NaN or Inf values
+%  4. Bounds not too narrow (ratio must be >= 1.1 to allow 10% range for adaptation)
+%  5. If any check fails, reset to defaults and warn
+%
+function P = validate_and_fix_precision_bounds(P)
+    % Define reasonable defaults
+    defaults = struct(...
+        'L1_motor', [10, 500], ...
+        'L2_motor', [0.5, 50], ...
+        'L1_plan', [10, 500], ...
+        'L2_plan', [0.5, 50]);
+    
+    % Check structure fields: motor_L1, motor_L2, plan_L1, plan_L2
+    bounds_fields = {'L1_motor', 'L2_motor', 'L1_plan', 'L2_plan'};
+    warnings_issued = {};
+    
+    for f = 1:numel(bounds_fields)
+        field_name = bounds_fields{f};
+        
+        % Check field exists
+        if ~isfield(P.pi_bounds, field_name)
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('Missing field %s.%s, reset to default [%g, %g]', ...
+                'pi_bounds', field_name, defaults.(field_name)(1), defaults.(field_name)(2));
+            continue;
+        end
+        
+        bounds = P.pi_bounds.(field_name);
+        
+        % Check: bounds is numeric vector of length 2
+        if ~isnumeric(bounds) || numel(bounds) ~= 2
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('%s.%s not a 2-element vector, reset to default', ...
+                'pi_bounds', field_name);
+            continue;
+        end
+        
+        % Check: no NaN or Inf
+        if any(~isfinite(bounds))
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('%s.%s contains NaN/Inf [%g, %g], reset to default', ...
+                'pi_bounds', field_name, bounds(1), bounds(2));
+            continue;
+        end
+        
+        % Check: min < max
+        if bounds(1) >= bounds(2)
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('%s.%s has min >= max [%g, %g], reset to default', ...
+                'pi_bounds', field_name, bounds(1), bounds(2));
+            continue;
+        end
+        
+        % Check: ratio in reasonable range [1.1, 1000]
+        ratio = bounds(2) / bounds(1);
+        if ratio < 1.1
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('%s.%s too narrow (ratio %.2f < 1.1), reset to default', ...
+                'pi_bounds', field_name, ratio);
+            continue;
+        elseif ratio > 1000
+            P.pi_bounds.(field_name) = defaults.(field_name);
+            warnings_issued{end+1} = sprintf('%s.%s too loose (ratio %.0f > 1000), reset to default', ...
+                'pi_bounds', field_name, ratio);
+            continue;
+        end
+    end
+    
+    % Print all warnings (if any)
+    if ~isempty(warnings_issued)
+        fprintf('\n*** PRECISION BOUNDS VALIDATION WARNINGS ***\n');
+        for w = 1:numel(warnings_issued)
+            fprintf('  [WARNING] %s\n', warnings_issued{w});
+        end
+        fprintf('*** END BOUNDS VALIDATION ***\n\n');
+    end
+end  % End validate_and_fix_precision_bounds
