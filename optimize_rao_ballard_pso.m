@@ -22,13 +22,13 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 90;  % Each particle = one parameter set
+num_particles = 150;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
 num_iterations = 90;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 7200 trials
-total_evals = num_particles * num_iterations;
+% Total evaluations will be: num_particles * num_iterations * N_trials (in main script/ 2) = 27000 trials
+total_evals = num_particles * num_iterations * 2;
 
 fprintf('PSO CONFIGURATION:\n');
 fprintf('  Number of particles (swarm size): %d\n', num_particles);
