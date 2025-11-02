@@ -293,6 +293,10 @@ fprintf('✓ LHS guarantees stratified coverage across all 15 dimensions\n');
 fprintf('✓ Each dimension divided into %d bins (one particle per bin)\n', num_particles);
 fprintf('✓ Maximizes exploration of 15D parameter space\n\n');
 
+% Initialize global best tracking BEFORE PSO loop
+global_best_score = inf;
+global_best_params = struct();
+
 % ====================================================================
 % PSO MAIN LOOP
 % ====================================================================
