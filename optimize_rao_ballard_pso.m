@@ -51,7 +51,7 @@ fprintf('  Noise scale (stochastic exploration): %.2f\n\n', noise_scale);
 % DEFINE SEARCH SPACE FOR PARAMETERS
 % ====================================================================
 
-% Parameter bounds - now includes 15 parameters (extended with task-conditional learning)
+% Parameter bounds (extended with task-conditional learning and adaptive precision)
 param_bounds = struct();
 
 % LEARNING RATES (log scale)
@@ -124,7 +124,7 @@ param_bounds.pi_L2_plan_max.max = 100;
 % For 3D reaching, primary metric is reaching distance improvement
 objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
 
-fprintf('PARAMETER SEARCH SPACE (15-DIMENSIONAL - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
+fprintf('PARAMETER SEARCH SPACE (CONFIGURED - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
 fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
 fprintf('LEARNING RATES:\n');
 fprintf('  eta_rep:  [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
@@ -183,22 +183,19 @@ fprintf('  Position RMSE:                 %.1f\n\n', objective_weights.position_
 fprintf('═══════════════════════════════════════════════════════════════\n');
 fprintf('Initializing particle swarm with TRUE LATIN HYPERCUBE SAMPLING...\n\n');
 
-% Create LHS design (90 x 15 matrix of stratified random samples in [0,1])
-% Each column is one dimension (parameter), each row is one particle
-% LHS guarantees: each dimension divided into 90 bins, exactly one particle per bin
-n_params = 15;  % Number of parameters to optimize
-
-% Generate Latin Hypercube Sample
-lhs_design = lhsdesign(num_particles, n_params, 'criterion', 'maximin');
-% lhs_design is 90x15, each entry in [0,1], guaranteed stratified coverage
-
-% Map LHS design [0,1] to actual parameter ranges
+% Create LHS design sized to the actual param list
 param_names = {'eta_rep', 'eta_W', 'momentum', 'weight_decay', ...
     'decay_motor', 'decay_plan', 'motor_gain', 'damping', ...
     'reaching_speed_scale', 'W_motor_gain', 'W_plan_gain', ...
     'interference_penalty_weight', 'alpha_precision_gain', ...
     'pi_L1_motor_max', 'pi_L2_motor_max', 'pi_L1_plan_max', 'pi_L2_plan_max'};
+n_params = numel(param_names);  % number of parameters to optimize (derived)
 
+% Create LHS design (num_particles x n_params)
+lhs_design = lhsdesign(num_particles, n_params, 'criterion', 'maximin');
+% lhs_design is num_particles x n_params, each entry in [0,1], guaranteed stratified coverage
+
+% Map LHS design [0,1] to actual parameter ranges
 % Create mapping from LHS columns to parameter bounds
 param_mapping = cell(n_params, 1);
 param_mapping{1} = struct('name', 'eta_rep', 'log_scale', true, ...
@@ -231,9 +228,14 @@ param_mapping{14} = struct('name', 'pi_L1_motor_max', 'log_scale', false, ...
     'min', param_bounds.pi_L1_motor_max.min, 'max', param_bounds.pi_L1_motor_max.max);
 param_mapping{15} = struct('name', 'pi_L2_motor_max', 'log_scale', false, ...
     'min', param_bounds.pi_L2_motor_max.min, 'max', param_bounds.pi_L2_motor_max.max);
+% Add planning precision max parameters (entries 16..17)
+param_mapping{16} = struct('name', 'pi_L1_plan_max', 'log_scale', false, ...
+    'min', param_bounds.pi_L1_plan_max.min, 'max', param_bounds.pi_L1_plan_max.max);
+param_mapping{17} = struct('name', 'pi_L2_plan_max', 'log_scale', false, ...
+    'min', param_bounds.pi_L2_plan_max.min, 'max', param_bounds.pi_L2_plan_max.max);
 
-% Note: Only 15 parameters (removed pi_*_min which are hard-coded)
-% Adjust mapping size if needed
+% Note: precision minimums (pi_*_min) were removed from optimization and are hard-coded in the main script
+% Adjust mapping size if needed (should not be necessary since mapping size derived from param_names)
 if numel(param_mapping) > n_params
     param_mapping = param_mapping(1:n_params);
 end
@@ -289,9 +291,9 @@ for p = 1:num_particles
 end
 
 fprintf('✓ Swarm initialized with %d particles using LATIN HYPERCUBE SAMPLING (LHS)\n', num_particles);
-fprintf('✓ LHS guarantees stratified coverage across all 15 dimensions\n');
+fprintf('✓ LHS guarantees stratified coverage across all %d dimensions\n', n_params);
 fprintf('✓ Each dimension divided into %d bins (one particle per bin)\n', num_particles);
-fprintf('✓ Maximizes exploration of 15D parameter space\n\n');
+fprintf('✓ Maximizes exploration of %dD parameter space\n\n', n_params);
 
 % Initialize global best tracking BEFORE PSO loop
 global_best_score = inf;
@@ -726,7 +728,7 @@ fprintf('═══════════════════════�
 fprintf('PSO OPTIMIZATION COMPLETE\n');
 fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
-fprintf('Best Parameters Found (15-DIMENSIONAL OPTIMIZATION):\n');
+fprintf('Best Parameters Found (%d-DIMENSIONAL OPTIMIZATION):\n', n_params);
 fprintf('  Score (weighted objective):  %.6f\n', global_best_score);
 fprintf('\n  LEARNING RATES:\n');
 fprintf('    eta_rep:                   %.6f\n', global_best_params.eta_rep);
