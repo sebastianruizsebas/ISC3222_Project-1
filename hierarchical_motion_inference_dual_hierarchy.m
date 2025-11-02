@@ -211,7 +211,7 @@ end
 
 % Layer dimensions (needed later when initializing representations)
 % NOTE: scale_factor controls how much to enlarge internal layers.
-scale_factor = 10.0;  % 1000% -> 10x
+scale_factor = 2.0;  % 200% -> 2x
 
 n_L0 = n_trials;        % One-hot encoding: which trial/task is active
 n_L1_motor = 7;         % keep L1 semantics [x,y,z,vx,vy,vz,bias] unchanged
@@ -280,6 +280,75 @@ pi_L2_motor_base = pi_L2_motor;
 pi_L1_plan_base = pi_L1_plan;
 pi_L2_plan_base = pi_L2_plan;
 
+% ====================================================================
+% ADAPTIVE PRECISION PARAMETERS (NEW - Error-Driven Precision Scaling)
+% ====================================================================
+% Prediction-error-driven precision: precision_new = precision_old * exp(alpha * error_magnitude)
+% Higher error → higher precision (tighter bounds on predictions)
+% Lower error → lower precision (allow flexibility/exploration)
+
+if nargin > 0 && isstruct(params)
+    if isfield(params, 'alpha_precision_gain')
+        alpha_precision_gain = params.alpha_precision_gain;
+    else
+        alpha_precision_gain = 0.5;  % Default sensitivity to error magnitude
+    end
+    if isfield(params, 'pi_L1_motor_min')
+        pi_L1_motor_min = params.pi_L1_motor_min;
+    else
+        pi_L1_motor_min = 10;   % Minimum precision (allow exploration)
+    end
+    if isfield(params, 'pi_L1_motor_max')
+        pi_L1_motor_max = params.pi_L1_motor_max;
+    else
+        pi_L1_motor_max = 500;  % Maximum precision (tight bounds)
+    end
+    if isfield(params, 'pi_L2_motor_min')
+        pi_L2_motor_min = params.pi_L2_motor_min;
+    else
+        pi_L2_motor_min = 1;
+    end
+    if isfield(params, 'pi_L2_motor_max')
+        pi_L2_motor_max = params.pi_L2_motor_max;
+    else
+        pi_L2_motor_max = 100;
+    end
+    if isfield(params, 'pi_L1_plan_min')
+        pi_L1_plan_min = params.pi_L1_plan_min;
+    else
+        pi_L1_plan_min = 10;
+    end
+    if isfield(params, 'pi_L1_plan_max')
+        pi_L1_plan_max = params.pi_L1_plan_max;
+    else
+        pi_L1_plan_max = 500;
+    end
+    if isfield(params, 'pi_L2_plan_min')
+        pi_L2_plan_min = params.pi_L2_plan_min;
+    else
+        pi_L2_plan_min = 1;
+    end
+    if isfield(params, 'pi_L2_plan_max')
+        pi_L2_plan_max = params.pi_L2_plan_max;
+    else
+        pi_L2_plan_max = 100;
+    end
+else
+    % Defaults (no PSO optimization)
+    alpha_precision_gain = 0.5;
+    pi_L1_motor_min = 10;    pi_L1_motor_max = 500;
+    pi_L2_motor_min = 1;     pi_L2_motor_max = 100;
+    pi_L1_plan_min = 10;     pi_L1_plan_max = 500;
+    pi_L2_plan_min = 1;      pi_L2_plan_max = 100;
+end
+
+% Store bounds in P struct for hierarchical_step_update helper
+P_pi_bounds = struct();
+P_pi_bounds.L1_motor = [pi_L1_motor_min, pi_L1_motor_max];
+P_pi_bounds.L2_motor = [pi_L2_motor_min, pi_L2_motor_max];
+P_pi_bounds.L1_plan = [pi_L1_plan_min, pi_L1_plan_max];
+P_pi_bounds.L2_plan = [pi_L2_plan_min, pi_L2_plan_max];
+
     if ~(exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false)
         fprintf('LEARNING PARAMETERS:\n');
         fprintf('  η_rep = %.6f (representation learning rate)\n', eta_rep);
@@ -289,7 +358,13 @@ pi_L2_plan_base = pi_L2_plan;
         fprintf('  Decay at Phase (Motor) = %.4f (95%%-98%% retained)\n', decay_motor);
         fprintf('  Decay at Phase (Planning) = %.4f (70%%-80%% retained)\n', decay_plan);
         fprintf('  π_motor   = [%.0f, %.0f, %.0f]\n', pi_L1_motor, pi_L2_motor, pi_L3_motor);
-        fprintf('  π_plan    = [%.0f, %.0f, %.0f]\n\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
+        fprintf('  π_plan    = [%.0f, %.0f, %.0f]\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
+        fprintf('\n  ADAPTIVE PRECISION (Error-Driven):\n');
+        fprintf('    alpha_precision_gain = %.4f (sensitivity to error magnitude)\n', alpha_precision_gain);
+        fprintf('    π_L1_motor bounds: [%.1f, %.1f]\n', pi_L1_motor_min, pi_L1_motor_max);
+        fprintf('    π_L2_motor bounds: [%.1f, %.1f]\n', pi_L2_motor_min, pi_L2_motor_max);
+        fprintf('    π_L1_plan bounds:  [%.1f, %.1f]\n', pi_L1_plan_min, pi_L1_plan_max);
+        fprintf('    π_L2_plan bounds:  [%.1f, %.1f]\n\n', pi_L2_plan_min, pi_L2_plan_max);
     end
 
 % ====================================================================
@@ -602,6 +677,11 @@ P.decay_motor = decay_motor; P.decay_plan = decay_plan; P.W_plan_gain = W_plan_g
 P.pi_smooth_alpha = pi_smooth_alpha; P.pi_max_step_ratio = pi_max_step_ratio; P.window_size = window_size;
 % Pass semantic indices to helper so it can be agnostic to L1 sizing
 P.idx_pos = idx_pos; P.idx_vel = idx_vel; P.idx_bias = idx_bias;
+% Pass adaptive precision parameters to helper
+P.alpha_precision_gain = alpha_precision_gain;
+P.pi_bounds = P_pi_bounds;  % Bounds for dynamic precision updates
+% FIX (Nov 2, 2025): Add missing interference_penalty_weight parameter
+P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight
 % Termination distance: when player is within this distance of ball the session ends
 P.termination_distance = 0.15;
 if nargin > 0 && isstruct(params) && isfield(params, 'termination_distance')

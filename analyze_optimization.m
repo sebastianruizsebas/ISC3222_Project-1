@@ -8,7 +8,7 @@ fprintf('PSO RESULTS ANALYZER\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
 
 % Find the latest optimization_results_3D_PSO_*.mat file
-pso_files = dir('optimization_results_3D_PSO_*.mat');
+pso_files = dir('optimization_results_3D_PSO_2025-11-02_01-30-25.mat');
 if isempty(pso_files)
     error('No PSO results files found. Run optimize_rao_ballard_pso.m first.');
 end

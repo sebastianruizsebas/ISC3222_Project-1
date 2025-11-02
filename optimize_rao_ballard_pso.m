@@ -22,10 +22,10 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 40;  % Each particle = one parameter set
+num_particles = 50;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 40;  % Each iteration = all particles tested
+num_iterations = 50;  % Each iteration = all particles tested
 
 % Total evaluations will be: num_particles * num_iterations = 1600 trials
 total_evals = num_particles * num_iterations;
@@ -38,8 +38,8 @@ fprintf('  Total model evaluations: %d\n\n', total_evals);
 % PSO hyperparameters (standard values)
 w = 0.7;        % Inertia weight (controls momentum of particles)
 c1 = 1.5;       % Cognitive parameter (attraction to particle's best)
-c2 = 1.5;       % Social parameter (attraction to swarm's best)
-noise_scale = 0.05;  % Noise scale for stochastic perturbations (5% of parameter range)
+c2 = 0.8;       % Social parameter (attraction to swarm's best)
+noise_scale = 0.08;  % Noise scale for stochastic perturbations (8% of parameter range)
 
 fprintf('PSO HYPERPARAMETERS:\n');
 fprintf('  Inertia weight (w): %.2f\n', w);
@@ -72,15 +72,13 @@ param_bounds.decay_motor.min = 0.90;    % Motor: 90-99% weight retention
 param_bounds.decay_motor.max = 0.99;
 % Planning region: forget old task-specific targets (lower retention)
 param_bounds.decay_plan.min = 0.50;     % Planning: 50-80% weight retention
-param_bounds.decay_plan.max = 0.80;
+param_bounds.decay_plan.max = 0.85;
 
 % MOTOR DYNAMICS (linear scale, affects trajectory quality)
 param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
 param_bounds.motor_gain.max = 1.0;
 param_bounds.damping.min = 0.30;        % Velocity dampening
 param_bounds.damping.max = 0.759;
-param_bounds.reaching_speed_scale.min = 0.7;  % Scale for initial reaching speed
-param_bounds.reaching_speed_scale.max = 1.0;
 
 % WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
 param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
@@ -93,12 +91,44 @@ param_bounds.W_plan_gain.max = 0.01;
 param_bounds.interference_penalty_weight.min = 0.0;   % No penalty
 param_bounds.interference_penalty_weight.max = 0.1;   % Max cross-task error penalty
 
+% ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025)
+% Prediction-error-driven precision: precision = precision_old * exp(alpha * error)
+% Higher sensitivity (alpha) → precision responds more aggressively to errors
+param_bounds.alpha_precision_gain.min = 0.1;      % Low sensitivity (smooth adaptation)
+param_bounds.alpha_precision_gain.max = 2.0;      % High sensitivity (sharp adaptation)
+
+% Precision bounds for L1 motor (proprioceptive / sensory level)
+% High precision = tighter constraints on proprioceptive predictions
+param_bounds.pi_L1_motor_min.min = 5;             % Minimum lower bound
+param_bounds.pi_L1_motor_min.max = 50;            % Maximum lower bound
+param_bounds.pi_L1_motor_max.min = 200;           % Minimum upper bound
+param_bounds.pi_L1_motor_max.max = 1000;          % Maximum upper bound
+
+% Precision bounds for L2 motor (intermediate basis functions)
+param_bounds.pi_L2_motor_min.min = 0.1;
+param_bounds.pi_L2_motor_min.max = 5;
+param_bounds.pi_L2_motor_max.min = 20;
+param_bounds.pi_L2_motor_max.max = 200;
+
+% Precision bounds for L1 plan (goal/target representation)
+% Visual targets may be less certain than proprioception
+param_bounds.pi_L1_plan_min.min = 5;
+param_bounds.pi_L1_plan_min.max = 50;
+param_bounds.pi_L1_plan_max.min = 100;
+param_bounds.pi_L1_plan_max.max = 500;
+
+% Precision bounds for L2 plan (planning policies)
+param_bounds.pi_L2_plan_min.min = 0.1;
+param_bounds.pi_L2_plan_min.max = 5;
+param_bounds.pi_L2_plan_max.min = 20;
+param_bounds.pi_L2_plan_max.max = 100;
+
 % Objective function weights
 % For 3D reaching, primary metric is reaching distance improvement
 objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
 
-fprintf('PARAMETER SEARCH SPACE (15-DIMENSIONAL - TASK-CONDITIONAL LEARNING):\n');
-fprintf('═════════════════════════════════════════\n');
+fprintf('PARAMETER SEARCH SPACE (19-DIMENSIONAL - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
+fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
 fprintf('LEARNING RATES:\n');
 fprintf('  eta_rep:  [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
     10^param_bounds.eta_rep.log_min, 10^param_bounds.eta_rep.log_max, ...
@@ -127,15 +157,31 @@ fprintf('  damping: [%.2f, %.2f]\n', ...
 fprintf('  reaching_speed_scale: [%.2f, %.2f]\n', ...
     param_bounds.reaching_speed_scale.min, param_bounds.reaching_speed_scale.max);
 
-fprintf('WEIGHT INITIALIZATION GAINS (convergence speed) (NEW format):\n');
+fprintf('WEIGHT INITIALIZATION GAINS (convergence speed):\n');
 fprintf('  W_motor_gain: [%.3f, %.2f]\n', ...
     param_bounds.W_motor_gain.min, param_bounds.W_motor_gain.max);
 fprintf('  W_plan_gain:  [%.3f, %.2f]\n', ...
     param_bounds.W_plan_gain.min, param_bounds.W_plan_gain.max);
 
-fprintf('TASK-CONDITIONAL LEARNING - INTERFERENCE PENALTY (NEW - Nov 1, 2025):\n');
-fprintf('  interference_penalty_weight: [%.4f, %.4f] (cross-task error penalty)\n\n', ...
+fprintf('TASK-CONDITIONAL LEARNING - INTERFERENCE PENALTY (Nov 1, 2025):\n');
+fprintf('  interference_penalty_weight: [%.4f, %.4f]\n\n', ...
     param_bounds.interference_penalty_weight.min, param_bounds.interference_penalty_weight.max);
+
+fprintf('ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025 - ERROR-DRIVEN):\n');
+fprintf('  alpha_precision_gain: [%.2f, %.2f] (exponential scaling sensitivity)\n', ...
+    param_bounds.alpha_precision_gain.min, param_bounds.alpha_precision_gain.max);
+fprintf('  pi_L1_motor bounds:   [min: %.1f-%.1f, max: %.0f-%.0f]\n', ...
+    param_bounds.pi_L1_motor_min.min, param_bounds.pi_L1_motor_min.max, ...
+    param_bounds.pi_L1_motor_max.min, param_bounds.pi_L1_motor_max.max);
+fprintf('  pi_L2_motor bounds:   [min: %.2f-%.1f, max: %.0f-%.0f]\n', ...
+    param_bounds.pi_L2_motor_min.min, param_bounds.pi_L2_motor_min.max, ...
+    param_bounds.pi_L2_motor_max.min, param_bounds.pi_L2_motor_max.max);
+fprintf('  pi_L1_plan bounds:    [min: %.1f-%.1f, max: %.0f-%.0f]\n', ...
+    param_bounds.pi_L1_plan_min.min, param_bounds.pi_L1_plan_min.max, ...
+    param_bounds.pi_L1_plan_max.min, param_bounds.pi_L1_plan_max.max);
+fprintf('  pi_L2_plan bounds:    [min: %.2f-%.1f, max: %.0f-%.0f]\n\n', ...
+    param_bounds.pi_L2_plan_min.min, param_bounds.pi_L2_plan_min.max, ...
+    param_bounds.pi_L2_plan_max.min, param_bounds.pi_L2_plan_max.max);
 
 fprintf('OBJECTIVE FUNCTION WEIGHTS:\n');
 fprintf('  Reaching distance improvement: %.1f\n', objective_weights.reaching_distance);
@@ -229,6 +275,57 @@ for p = 1:num_particles
     ipw_cell = ipw_min + (p-1) * (ipw_max - ipw_min) / num_particles;
     particles(p).interference_penalty_weight = ipw_cell + rand() * (ipw_max - ipw_min) / num_particles;
     
+    % ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025)
+    % alpha_precision_gain: sensitivity to prediction error magnitude
+    apg_min = param_bounds.alpha_precision_gain.min;
+    apg_max = param_bounds.alpha_precision_gain.max;
+    apg_cell = apg_min + (p-1) * (apg_max - apg_min) / num_particles;
+    particles(p).alpha_precision_gain = apg_cell + rand() * (apg_max - apg_min) / num_particles;
+    
+    % Precision bounds for L1 motor
+    pi_L1m_min_min = param_bounds.pi_L1_motor_min.min;
+    pi_L1m_min_max = param_bounds.pi_L1_motor_min.max;
+    pi_L1m_min_cell = pi_L1m_min_min + (p-1) * (pi_L1m_min_max - pi_L1m_min_min) / num_particles;
+    particles(p).pi_L1_motor_min = pi_L1m_min_cell + rand() * (pi_L1m_min_max - pi_L1m_min_min) / num_particles;
+    
+    pi_L1m_max_min = param_bounds.pi_L1_motor_max.min;
+    pi_L1m_max_max = param_bounds.pi_L1_motor_max.max;
+    pi_L1m_max_cell = pi_L1m_max_min + (p-1) * (pi_L1m_max_max - pi_L1m_max_min) / num_particles;
+    particles(p).pi_L1_motor_max = pi_L1m_max_cell + rand() * (pi_L1m_max_max - pi_L1m_max_min) / num_particles;
+    
+    % Precision bounds for L2 motor
+    pi_L2m_min_min = param_bounds.pi_L2_motor_min.min;
+    pi_L2m_min_max = param_bounds.pi_L2_motor_min.max;
+    pi_L2m_min_cell = pi_L2m_min_min + (p-1) * (pi_L2m_min_max - pi_L2m_min_min) / num_particles;
+    particles(p).pi_L2_motor_min = pi_L2m_min_cell + rand() * (pi_L2m_min_max - pi_L2m_min_min) / num_particles;
+    
+    pi_L2m_max_min = param_bounds.pi_L2_motor_max.min;
+    pi_L2m_max_max = param_bounds.pi_L2_motor_max.max;
+    pi_L2m_max_cell = pi_L2m_max_min + (p-1) * (pi_L2m_max_max - pi_L2m_max_min) / num_particles;
+    particles(p).pi_L2_motor_max = pi_L2m_max_cell + rand() * (pi_L2m_max_max - pi_L2m_max_min) / num_particles;
+    
+    % Precision bounds for L1 plan
+    pi_L1p_min_min = param_bounds.pi_L1_plan_min.min;
+    pi_L1p_min_max = param_bounds.pi_L1_plan_min.max;
+    pi_L1p_min_cell = pi_L1p_min_min + (p-1) * (pi_L1p_min_max - pi_L1p_min_min) / num_particles;
+    particles(p).pi_L1_plan_min = pi_L1p_min_cell + rand() * (pi_L1p_min_max - pi_L1p_min_min) / num_particles;
+    
+    pi_L1p_max_min = param_bounds.pi_L1_plan_max.min;
+    pi_L1p_max_max = param_bounds.pi_L1_plan_max.max;
+    pi_L1p_max_cell = pi_L1p_max_min + (p-1) * (pi_L1p_max_max - pi_L1p_max_min) / num_particles;
+    particles(p).pi_L1_plan_max = pi_L1p_max_cell + rand() * (pi_L1p_max_max - pi_L1p_max_min) / num_particles;
+    
+    % Precision bounds for L2 plan
+    pi_L2p_min_min = param_bounds.pi_L2_plan_min.min;
+    pi_L2p_min_max = param_bounds.pi_L2_plan_min.max;
+    pi_L2p_min_cell = pi_L2p_min_min + (p-1) * (pi_L2p_min_max - pi_L2p_min_min) / num_particles;
+    particles(p).pi_L2_plan_min = pi_L2p_min_cell + rand() * (pi_L2p_min_max - pi_L2p_min_min) / num_particles;
+    
+    pi_L2p_max_min = param_bounds.pi_L2_plan_max.min;
+    pi_L2p_max_max = param_bounds.pi_L2_plan_max.max;
+    pi_L2p_max_cell = pi_L2p_max_min + (p-1) * (pi_L2p_max_max - pi_L2p_max_min) / num_particles;
+    particles(p).pi_L2_plan_max = pi_L2p_max_cell + rand() * (pi_L2p_max_max - pi_L2p_max_min) / num_particles;
+    
     % Initialize velocity with larger range for exploration
     particles(p).vel_eta_rep = -2 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min) + ...
         rand() * 4 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min);
@@ -254,6 +351,24 @@ for p = 1:num_particles
         rand() * 4 * (param_bounds.W_plan_gain.max - param_bounds.W_plan_gain.min);
     particles(p).vel_interference_penalty_weight = -2 * (param_bounds.interference_penalty_weight.max - param_bounds.interference_penalty_weight.min) + ...
         rand() * 4 * (param_bounds.interference_penalty_weight.max - param_bounds.interference_penalty_weight.min);
+    particles(p).vel_alpha_precision_gain = -2 * (param_bounds.alpha_precision_gain.max - param_bounds.alpha_precision_gain.min) + ...
+        rand() * 4 * (param_bounds.alpha_precision_gain.max - param_bounds.alpha_precision_gain.min);
+    particles(p).vel_pi_L1_motor_min = -2 * (param_bounds.pi_L1_motor_min.max - param_bounds.pi_L1_motor_min.min) + ...
+        rand() * 4 * (param_bounds.pi_L1_motor_min.max - param_bounds.pi_L1_motor_min.min);
+    particles(p).vel_pi_L1_motor_max = -2 * (param_bounds.pi_L1_motor_max.max - param_bounds.pi_L1_motor_max.min) + ...
+        rand() * 4 * (param_bounds.pi_L1_motor_max.max - param_bounds.pi_L1_motor_max.min);
+    particles(p).vel_pi_L2_motor_min = -2 * (param_bounds.pi_L2_motor_min.max - param_bounds.pi_L2_motor_min.min) + ...
+        rand() * 4 * (param_bounds.pi_L2_motor_min.max - param_bounds.pi_L2_motor_min.min);
+    particles(p).vel_pi_L2_motor_max = -2 * (param_bounds.pi_L2_motor_max.max - param_bounds.pi_L2_motor_max.min) + ...
+        rand() * 4 * (param_bounds.pi_L2_motor_max.max - param_bounds.pi_L2_motor_max.min);
+    particles(p).vel_pi_L1_plan_min = -2 * (param_bounds.pi_L1_plan_min.max - param_bounds.pi_L1_plan_min.min) + ...
+        rand() * 4 * (param_bounds.pi_L1_plan_min.max - param_bounds.pi_L1_plan_min.min);
+    particles(p).vel_pi_L1_plan_max = -2 * (param_bounds.pi_L1_plan_max.max - param_bounds.pi_L1_plan_max.min) + ...
+        rand() * 4 * (param_bounds.pi_L1_plan_max.max - param_bounds.pi_L1_plan_max.min);
+    particles(p).vel_pi_L2_plan_min = -2 * (param_bounds.pi_L2_plan_min.max - param_bounds.pi_L2_plan_min.min) + ...
+        rand() * 4 * (param_bounds.pi_L2_plan_min.max - param_bounds.pi_L2_plan_min.min);
+    particles(p).vel_pi_L2_plan_max = -2 * (param_bounds.pi_L2_plan_max.max - param_bounds.pi_L2_plan_max.min) + ...
+        rand() * 4 * (param_bounds.pi_L2_plan_max.max - param_bounds.pi_L2_plan_max.min);
     
     % Initialize particle's best position and score
     particles(p).best_eta_rep = particles(p).eta_rep;
@@ -268,6 +383,15 @@ for p = 1:num_particles
     particles(p).best_W_motor_gain = particles(p).W_motor_gain;
     particles(p).best_W_plan_gain = particles(p).W_plan_gain;
     particles(p).best_interference_penalty_weight = particles(p).interference_penalty_weight;
+    particles(p).best_alpha_precision_gain = particles(p).alpha_precision_gain;
+    particles(p).best_pi_L1_motor_min = particles(p).pi_L1_motor_min;
+    particles(p).best_pi_L1_motor_max = particles(p).pi_L1_motor_max;
+    particles(p).best_pi_L2_motor_min = particles(p).pi_L2_motor_min;
+    particles(p).best_pi_L2_motor_max = particles(p).pi_L2_motor_max;
+    particles(p).best_pi_L1_plan_min = particles(p).pi_L1_plan_min;
+    particles(p).best_pi_L1_plan_max = particles(p).pi_L1_plan_max;
+    particles(p).best_pi_L2_plan_min = particles(p).pi_L2_plan_min;
+    particles(p).best_pi_L2_plan_max = particles(p).pi_L2_plan_max;
     particles(p).best_score = inf;
 end
 
@@ -275,7 +399,10 @@ end
     global_best_score = inf;
     global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, 'weight_decay', nan, ...
         'decay_motor', nan, 'decay_plan', nan, 'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, ...
-        'W_motor_gain', nan, 'W_plan_gain', nan, 'interference_penalty_weight', nan);
+        'W_motor_gain', nan, 'W_plan_gain', nan, 'interference_penalty_weight', nan, ...
+        'alpha_precision_gain', nan, 'pi_L1_motor_min', nan, 'pi_L1_motor_max', nan, ...
+        'pi_L2_motor_min', nan, 'pi_L2_motor_max', nan, 'pi_L1_plan_min', nan, 'pi_L1_plan_max', nan, ...
+        'pi_L2_plan_min', nan, 'pi_L2_plan_max', nan);
 
 fprintf('Swarm initialized with %d SPREAD-OUT particles.\n', num_particles);
 fprintf('Particles distributed across entire parameter space (stratified sampling).\n\n');
@@ -438,6 +565,33 @@ for iteration = 1:num_iterations
                 if isfield(pb, 'interference_penalty_weight')
                     particles(p).best_interference_penalty_weight = pb.interference_penalty_weight;
                 end
+                if isfield(pb, 'alpha_precision_gain')
+                    particles(p).best_alpha_precision_gain = pb.alpha_precision_gain;
+                end
+                if isfield(pb, 'pi_L1_motor_min')
+                    particles(p).best_pi_L1_motor_min = pb.pi_L1_motor_min;
+                end
+                if isfield(pb, 'pi_L1_motor_max')
+                    particles(p).best_pi_L1_motor_max = pb.pi_L1_motor_max;
+                end
+                if isfield(pb, 'pi_L2_motor_min')
+                    particles(p).best_pi_L2_motor_min = pb.pi_L2_motor_min;
+                end
+                if isfield(pb, 'pi_L2_motor_max')
+                    particles(p).best_pi_L2_motor_max = pb.pi_L2_motor_max;
+                end
+                if isfield(pb, 'pi_L1_plan_min')
+                    particles(p).best_pi_L1_plan_min = pb.pi_L1_plan_min;
+                end
+                if isfield(pb, 'pi_L1_plan_max')
+                    particles(p).best_pi_L1_plan_max = pb.pi_L1_plan_max;
+                end
+                if isfield(pb, 'pi_L2_plan_min')
+                    particles(p).best_pi_L2_plan_min = pb.pi_L2_plan_min;
+                end
+                if isfield(pb, 'pi_L2_plan_max')
+                    particles(p).best_pi_L2_plan_max = pb.pi_L2_plan_max;
+                end
             end
             fprintf('    ★ Particle %d new personal best: %.6f\n', p, current_score);
         end
@@ -457,6 +611,15 @@ for iteration = 1:num_iterations
             global_best_params.W_motor_gain = particles(p).W_motor_gain;
             global_best_params.W_plan_gain = particles(p).W_plan_gain;
             global_best_params.interference_penalty_weight = particles(p).interference_penalty_weight;
+            global_best_params.alpha_precision_gain = particles(p).alpha_precision_gain;
+            global_best_params.pi_L1_motor_min = particles(p).pi_L1_motor_min;
+            global_best_params.pi_L1_motor_max = particles(p).pi_L1_motor_max;
+            global_best_params.pi_L2_motor_min = particles(p).pi_L2_motor_min;
+            global_best_params.pi_L2_motor_max = particles(p).pi_L2_motor_max;
+            global_best_params.pi_L1_plan_min = particles(p).pi_L1_plan_min;
+            global_best_params.pi_L1_plan_max = particles(p).pi_L1_plan_max;
+            global_best_params.pi_L2_plan_min = particles(p).pi_L2_plan_min;
+            global_best_params.pi_L2_plan_max = particles(p).pi_L2_plan_max;
             fprintf('    ✯ NEW GLOBAL BEST (particle %d): %.6f ✯\n', p, global_best_score);
             try
                 out_dir = './figures'; if ~exist(out_dir, 'dir'), mkdir(out_dir); end
@@ -584,6 +747,78 @@ for iteration = 1:num_iterations
             c1 * r1 * (particles(p).best_interference_penalty_weight - particles(p).interference_penalty_weight) + ...
             c2 * r2 * (global_best_params.interference_penalty_weight - particles(p).interference_penalty_weight) + noise_ipw;
         
+        % alpha_precision_gain (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        apg_range = param_bounds.alpha_precision_gain.max - param_bounds.alpha_precision_gain.min;
+        noise_apg = noise_scale * apg_range * randn();
+        particles(p).vel_alpha_precision_gain = w * particles(p).vel_alpha_precision_gain + ...
+            c1 * r1 * (particles(p).best_alpha_precision_gain - particles(p).alpha_precision_gain) + ...
+            c2 * r2 * (global_best_params.alpha_precision_gain - particles(p).alpha_precision_gain) + noise_apg;
+        
+        % pi_L1_motor_min (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L1m_min_range = param_bounds.pi_L1_motor_min.max - param_bounds.pi_L1_motor_min.min;
+        noise_pi_L1m_min = noise_scale * pi_L1m_min_range * randn();
+        particles(p).vel_pi_L1_motor_min = w * particles(p).vel_pi_L1_motor_min + ...
+            c1 * r1 * (particles(p).best_pi_L1_motor_min - particles(p).pi_L1_motor_min) + ...
+            c2 * r2 * (global_best_params.pi_L1_motor_min - particles(p).pi_L1_motor_min) + noise_pi_L1m_min;
+        
+        % pi_L1_motor_max (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L1m_max_range = param_bounds.pi_L1_motor_max.max - param_bounds.pi_L1_motor_max.min;
+        noise_pi_L1m_max = noise_scale * pi_L1m_max_range * randn();
+        particles(p).vel_pi_L1_motor_max = w * particles(p).vel_pi_L1_motor_max + ...
+            c1 * r1 * (particles(p).best_pi_L1_motor_max - particles(p).pi_L1_motor_max) + ...
+            c2 * r2 * (global_best_params.pi_L1_motor_max - particles(p).pi_L1_motor_max) + noise_pi_L1m_max;
+        
+        % pi_L2_motor_min (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L2m_min_range = param_bounds.pi_L2_motor_min.max - param_bounds.pi_L2_motor_min.min;
+        noise_pi_L2m_min = noise_scale * pi_L2m_min_range * randn();
+        particles(p).vel_pi_L2_motor_min = w * particles(p).vel_pi_L2_motor_min + ...
+            c1 * r1 * (particles(p).best_pi_L2_motor_min - particles(p).pi_L2_motor_min) + ...
+            c2 * r2 * (global_best_params.pi_L2_motor_min - particles(p).pi_L2_motor_min) + noise_pi_L2m_min;
+        
+        % pi_L2_motor_max (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L2m_max_range = param_bounds.pi_L2_motor_max.max - param_bounds.pi_L2_motor_max.min;
+        noise_pi_L2m_max = noise_scale * pi_L2m_max_range * randn();
+        particles(p).vel_pi_L2_motor_max = w * particles(p).vel_pi_L2_motor_max + ...
+            c1 * r1 * (particles(p).best_pi_L2_motor_max - particles(p).pi_L2_motor_max) + ...
+            c2 * r2 * (global_best_params.pi_L2_motor_max - particles(p).pi_L2_motor_max) + noise_pi_L2m_max;
+        
+        % pi_L1_plan_min (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L1p_min_range = param_bounds.pi_L1_plan_min.max - param_bounds.pi_L1_plan_min.min;
+        noise_pi_L1p_min = noise_scale * pi_L1p_min_range * randn();
+        particles(p).vel_pi_L1_plan_min = w * particles(p).vel_pi_L1_plan_min + ...
+            c1 * r1 * (particles(p).best_pi_L1_plan_min - particles(p).pi_L1_plan_min) + ...
+            c2 * r2 * (global_best_params.pi_L1_plan_min - particles(p).pi_L1_plan_min) + noise_pi_L1p_min;
+        
+        % pi_L1_plan_max (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L1p_max_range = param_bounds.pi_L1_plan_max.max - param_bounds.pi_L1_plan_max.min;
+        noise_pi_L1p_max = noise_scale * pi_L1p_max_range * randn();
+        particles(p).vel_pi_L1_plan_max = w * particles(p).vel_pi_L1_plan_max + ...
+            c1 * r1 * (particles(p).best_pi_L1_plan_max - particles(p).pi_L1_plan_max) + ...
+            c2 * r2 * (global_best_params.pi_L1_plan_max - particles(p).pi_L1_plan_max) + noise_pi_L1p_max;
+        
+        % pi_L2_plan_min (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L2p_min_range = param_bounds.pi_L2_plan_min.max - param_bounds.pi_L2_plan_min.min;
+        noise_pi_L2p_min = noise_scale * pi_L2p_min_range * randn();
+        particles(p).vel_pi_L2_plan_min = w * particles(p).vel_pi_L2_plan_min + ...
+            c1 * r1 * (particles(p).best_pi_L2_plan_min - particles(p).pi_L2_plan_min) + ...
+            c2 * r2 * (global_best_params.pi_L2_plan_min - particles(p).pi_L2_plan_min) + noise_pi_L2p_min;
+        
+        % pi_L2_plan_max (linear scale) - NEW (Nov 2, 2025)
+        r1 = rand(); r2 = rand();
+        pi_L2p_max_range = param_bounds.pi_L2_plan_max.max - param_bounds.pi_L2_plan_max.min;
+        noise_pi_L2p_max = noise_scale * pi_L2p_max_range * randn();
+        particles(p).vel_pi_L2_plan_max = w * particles(p).vel_pi_L2_plan_max + ...
+            c1 * r1 * (particles(p).best_pi_L2_plan_max - particles(p).pi_L2_plan_max) + ...
+            c2 * r2 * (global_best_params.pi_L2_plan_max - particles(p).pi_L2_plan_max) + noise_pi_L2p_max;
+        
         % Position updates
         % For log-scale parameters, position is updated on log scale then converted
         log_eta_rep_new = log10(particles(p).eta_rep) + particles(p).vel_eta_rep;
@@ -602,6 +837,15 @@ for iteration = 1:num_iterations
         particles(p).W_motor_gain = particles(p).W_motor_gain + particles(p).vel_W_motor_gain;
         particles(p).W_plan_gain = particles(p).W_plan_gain + particles(p).vel_W_plan_gain;
         particles(p).interference_penalty_weight = particles(p).interference_penalty_weight + particles(p).vel_interference_penalty_weight;
+        particles(p).alpha_precision_gain = particles(p).alpha_precision_gain + particles(p).vel_alpha_precision_gain;
+        particles(p).pi_L1_motor_min = particles(p).pi_L1_motor_min + particles(p).vel_pi_L1_motor_min;
+        particles(p).pi_L1_motor_max = particles(p).pi_L1_motor_max + particles(p).vel_pi_L1_motor_max;
+        particles(p).pi_L2_motor_min = particles(p).pi_L2_motor_min + particles(p).vel_pi_L2_motor_min;
+        particles(p).pi_L2_motor_max = particles(p).pi_L2_motor_max + particles(p).vel_pi_L2_motor_max;
+        particles(p).pi_L1_plan_min = particles(p).pi_L1_plan_min + particles(p).vel_pi_L1_plan_min;
+        particles(p).pi_L1_plan_max = particles(p).pi_L1_plan_max + particles(p).vel_pi_L1_plan_max;
+        particles(p).pi_L2_plan_min = particles(p).pi_L2_plan_min + particles(p).vel_pi_L2_plan_min;
+        particles(p).pi_L2_plan_max = particles(p).pi_L2_plan_max + particles(p).vel_pi_L2_plan_max;
         
         % Enforce bounds on all parameters
         particles(p).eta_rep = max(10^param_bounds.eta_rep.log_min, min(10^param_bounds.eta_rep.log_max, particles(p).eta_rep));
@@ -616,6 +860,15 @@ for iteration = 1:num_iterations
         particles(p).W_motor_gain = max(param_bounds.W_motor_gain.min, min(param_bounds.W_motor_gain.max, particles(p).W_motor_gain));
         particles(p).W_plan_gain = max(param_bounds.W_plan_gain.min, min(param_bounds.W_plan_gain.max, particles(p).W_plan_gain));
         particles(p).interference_penalty_weight = max(param_bounds.interference_penalty_weight.min, min(param_bounds.interference_penalty_weight.max, particles(p).interference_penalty_weight));
+        particles(p).alpha_precision_gain = max(param_bounds.alpha_precision_gain.min, min(param_bounds.alpha_precision_gain.max, particles(p).alpha_precision_gain));
+        particles(p).pi_L1_motor_min = max(param_bounds.pi_L1_motor_min.min, min(param_bounds.pi_L1_motor_min.max, particles(p).pi_L1_motor_min));
+        particles(p).pi_L1_motor_max = max(param_bounds.pi_L1_motor_max.min, min(param_bounds.pi_L1_motor_max.max, particles(p).pi_L1_motor_max));
+        particles(p).pi_L2_motor_min = max(param_bounds.pi_L2_motor_min.min, min(param_bounds.pi_L2_motor_min.max, particles(p).pi_L2_motor_min));
+        particles(p).pi_L2_motor_max = max(param_bounds.pi_L2_motor_max.min, min(param_bounds.pi_L2_motor_max.max, particles(p).pi_L2_motor_max));
+        particles(p).pi_L1_plan_min = max(param_bounds.pi_L1_plan_min.min, min(param_bounds.pi_L1_plan_min.max, particles(p).pi_L1_plan_min));
+        particles(p).pi_L1_plan_max = max(param_bounds.pi_L1_plan_max.min, min(param_bounds.pi_L1_plan_max.max, particles(p).pi_L1_plan_max));
+        particles(p).pi_L2_plan_min = max(param_bounds.pi_L2_plan_min.min, min(param_bounds.pi_L2_plan_min.max, particles(p).pi_L2_plan_min));
+        particles(p).pi_L2_plan_max = max(param_bounds.pi_L2_plan_max.min, min(param_bounds.pi_L2_plan_max.max, particles(p).pi_L2_plan_max));
     end
 end
 
@@ -628,7 +881,7 @@ fprintf('═══════════════════════�
 fprintf('PSO OPTIMIZATION COMPLETE\n');
 fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
-fprintf('Best Parameters Found (15-DIMENSIONAL TASK-CONDITIONAL OPTIMIZATION - Nov 1, 2025):\n');
+fprintf('Best Parameters Found (19-DIMENSIONAL ADAPTIVE PRECISION OPTIMIZATION - Nov 2, 2025):\n');
 fprintf('  Score (weighted objective):  %.6f\n', global_best_score);
 fprintf('\n  LEARNING RATES:\n');
 fprintf('    eta_rep:                   %.6f\n', global_best_params.eta_rep);
@@ -647,7 +900,17 @@ fprintf('\n  WEIGHT INITIALIZATION GAINS (NEW format - Nov 1, 2025):\n');
 fprintf('    W_motor_gain:              %.6f (motor weight initialization)\n', global_best_params.W_motor_gain);
 fprintf('    W_plan_gain:               %.6f (planning weight initialization)\n', global_best_params.W_plan_gain);
 fprintf('\n  TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 1, 2025):\n');
-fprintf('    interference_penalty_weight: %.6f (cross-task error penalty)\n\n', global_best_params.interference_penalty_weight);
+fprintf('    interference_penalty_weight: %.6f (cross-task error penalty)\n', global_best_params.interference_penalty_weight);
+fprintf('\n  ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025):\n');
+fprintf('    alpha_precision_gain:      %.6f (error-driven precision sensitivity)\n', global_best_params.alpha_precision_gain);
+fprintf('    pi_L1_motor_min:           %.6f (motor L1 min precision)\n', global_best_params.pi_L1_motor_min);
+fprintf('    pi_L1_motor_max:           %.6f (motor L1 max precision)\n', global_best_params.pi_L1_motor_max);
+fprintf('    pi_L2_motor_min:           %.6f (motor L2 min precision)\n', global_best_params.pi_L2_motor_min);
+fprintf('    pi_L2_motor_max:           %.6f (motor L2 max precision)\n', global_best_params.pi_L2_motor_max);
+fprintf('    pi_L1_plan_min:            %.6f (planning L1 min precision)\n', global_best_params.pi_L1_plan_min);
+fprintf('    pi_L1_plan_max:            %.6f (planning L1 max precision)\n', global_best_params.pi_L1_plan_max);
+fprintf('    pi_L2_plan_min:            %.6f (planning L2 min precision)\n', global_best_params.pi_L2_plan_min);
+fprintf('    pi_L2_plan_max:            %.6f (planning L2 max precision)\n\n', global_best_params.pi_L2_plan_max);
 
 % Create results struct for saving
 results = struct();

@@ -146,27 +146,55 @@ S.pred_L2_motor(i,:) = task_gate_motor * (S.R_L3_motor(i,:) * W_motor_L3_to_L2_a
 
 S.pred_L1_motor(i,:) = task_gate_motor * (S.R_L2_motor(i,:) * W_motor_L2_to_L1_active' + S.R_L1_motor(i,:) * W_motor_L1_lat_active');
 
-% extract velocity predictions using semantic indices (pad/truncate to 3 elements if needed)
+% --- MOTOR VELOCITY COMMAND EXTRACTION (CORRECTED) ---
+% Extract velocity predictions using semantic indices
 tmp_vel = S.pred_L1_motor(i, idx_vel);
 pred_vel_motor = zeros(1,3);
 n_tmp = numel(tmp_vel);
 pred_vel_motor(1:min(3,n_tmp)) = tmp_vel(1:min(3,n_tmp));
-S.motor_vx_motor(i) = P.motor_gain * pred_vel_motor(1);
-S.motor_vy_motor(i) = P.motor_gain * pred_vel_motor(2);
-S.motor_vz_motor(i) = P.motor_gain * pred_vel_motor(3);
+
+% CRITICAL FIX: Motor predictions should represent desired velocity toward the ball,
+% not just echo back current proprioception. The error signal should drive toward
+% the target (ball), not away from it.
+% 
+% Desired velocity = direction to ball * reaching_speed
+target_dir = ([S.x_ball(i+1), S.y_ball(i+1), S.z_ball(i+1)] - [S.x_player(i+1), S.y_player(i+1), S.z_player(i+1)]);
+target_dist = norm(target_dir);
+if target_dist > 1e-6
+    target_dir = target_dir / target_dist;
+else
+    target_dir = [0, 0, 0];
+end
+
+% Scale reaching speed based on distance
+reaching_speed_adaptive = P.reaching_speed_scale * min(target_dist, 5.0);  % cap at 5.0 m/s
+desired_vel_motor = target_dir * reaching_speed_adaptive;
+
+% Motor command: use blend of learned prediction + desired direction
+% This encourages motor region to learn how to steer toward target
+alpha_motor_blend = 0.6;  % blend factor (60% desired, 40% learned)
+S.motor_vx_motor(i) = P.motor_gain * (alpha_motor_blend * desired_vel_motor(1) + (1-alpha_motor_blend) * pred_vel_motor(1));
+S.motor_vy_motor(i) = P.motor_gain * (alpha_motor_blend * desired_vel_motor(2) + (1-alpha_motor_blend) * pred_vel_motor(2));
+S.motor_vz_motor(i) = P.motor_gain * (alpha_motor_blend * desired_vel_motor(3) + (1-alpha_motor_blend) * pred_vel_motor(3));
 
 % Planning region predictions with task gating
 S.pred_L2_plan(i,:) = task_gate_plan * (S.R_L3_plan(i,:) * W_plan_L3_to_L2_active' + S.R_L2_plan(i,:) * W_plan_L2_lat_active');
 
 S.pred_L1_plan(i,:) = task_gate_plan * (S.R_L2_plan(i,:) * W_plan_L2_to_L1_active' + S.R_L1_plan(i,:) * W_plan_L1_lat_active');
 
+% --- PLANNING VELOCITY COMMAND EXTRACTION (CORRECTED) ---
 tmp_vel_p = S.pred_L1_plan(i, idx_vel);
 pred_vel_plan = zeros(1,3);
 n_tmp_p = numel(tmp_vel_p);
 pred_vel_plan(1:min(3,n_tmp_p)) = tmp_vel_p(1:min(3,n_tmp_p));
-S.motor_vx_plan(i) = P.motor_gain * pred_vel_plan(1);
-S.motor_vy_plan(i) = P.motor_gain * pred_vel_plan(2);
-S.motor_vz_plan(i) = P.motor_gain * pred_vel_plan(3);
+
+% Same correction: blend learned planning with desired direction
+desired_vel_plan = target_dir * reaching_speed_adaptive;  % reuse target_dir from motor computation above
+alpha_plan_blend = 0.4;  % planning: 40% desired, 60% learned (let planning specialize more)
+
+S.motor_vx_plan(i) = P.motor_gain * (alpha_plan_blend * desired_vel_plan(1) + (1-alpha_plan_blend) * pred_vel_plan(1));
+S.motor_vy_plan(i) = P.motor_gain * (alpha_plan_blend * desired_vel_plan(2) + (1-alpha_plan_blend) * pred_vel_plan(2));
+S.motor_vz_plan(i) = P.motor_gain * (alpha_plan_blend * desired_vel_plan(3) + (1-alpha_plan_blend) * pred_vel_plan(3));
 
 % ------------------------------
 % COMBINED OUTPUT & KINEMATICS
@@ -393,6 +421,59 @@ if is_nan_inf && ~nan_reported
     S.pi_L2_plan = max(min_precision, min(max_precision, S.pi_L2_plan));
 end
 
+% --- ADAPTIVE PRECISION: PREDICTION ERROR MAGNITUDE ---
+% Core principle: high prediction error → increase precision (tighten bounds)
+%                 low prediction error → decrease precision (allow flexibility)
+%
+% This is neurobiologically motivated by gain modulation in cortex
+
+% Compute normalized prediction error magnitudes
+E_L1_motor_mag = sqrt(sum(S.E_L1_motor(i,:).^2));
+E_L2_motor_mag = sqrt(sum(S.E_L2_motor(i,:).^2));
+E_L1_plan_mag = sqrt(sum(S.E_L1_plan(i,:).^2));
+E_L2_plan_mag = sqrt(sum(S.E_L2_plan(i,:).^2));
+
+% Exponential precision scaling (keeps values stable)
+% precision_scale = exp(alpha * error_magnitude)
+% Higher error → higher scale → higher precision (tighter bounds)
+% FIX (Nov 2, 2025): Use P.alpha_precision_gain instead of hardcoded value
+if isfield(P, 'alpha_precision_gain')
+    alpha_precision_gain = P.alpha_precision_gain;  % Use PSO-optimizable value
+else
+    alpha_precision_gain = 0.5;  % Fallback default
+end
+
+precision_scale_L1_motor = exp(alpha_precision_gain * min(E_L1_motor_mag, 5.0));  % cap at error=5
+precision_scale_L2_motor = exp(alpha_precision_gain * min(E_L2_motor_mag, 5.0));
+precision_scale_L1_plan = exp(alpha_precision_gain * min(E_L1_plan_mag, 5.0));
+precision_scale_L2_plan = exp(alpha_precision_gain * min(E_L2_plan_mag, 5.0));
+
+% Apply multiplicative scaling
+S.pi_L1_motor = S.pi_L1_motor * precision_scale_L1_motor;
+S.pi_L2_motor = S.pi_L2_motor * precision_scale_L2_motor;
+S.pi_L1_plan = S.pi_L1_plan * precision_scale_L1_plan;
+S.pi_L2_plan = S.pi_L2_plan * precision_scale_L2_plan;
+
+% Safety clamps (prevent runaway precision)
+% FIX (Nov 2, 2025): Use P.pi_bounds instead of hardcoded ranges
+if isfield(P, 'pi_bounds')
+    pi_L1_motor_min = P.pi_bounds.L1_motor(1); pi_L1_motor_max = P.pi_bounds.L1_motor(2);
+    pi_L2_motor_min = P.pi_bounds.L2_motor(1); pi_L2_motor_max = P.pi_bounds.L2_motor(2);
+    pi_L1_plan_min = P.pi_bounds.L1_plan(1);  pi_L1_plan_max = P.pi_bounds.L1_plan(2);
+    pi_L2_plan_min = P.pi_bounds.L2_plan(1);  pi_L2_plan_max = P.pi_bounds.L2_plan(2);
+else
+    % Fallback defaults (if P.pi_bounds not provided)
+    pi_L1_motor_min = 10;   pi_L1_motor_max = 500;
+    pi_L2_motor_min = 0.5;  pi_L2_motor_max = 50;
+    pi_L1_plan_min = 10;    pi_L1_plan_max = 500;
+    pi_L2_plan_min = 0.5;   pi_L2_plan_max = 50;
+end
+
+S.pi_L1_motor = max(pi_L1_motor_min, min(pi_L1_motor_max, S.pi_L1_motor));
+S.pi_L2_motor = max(pi_L2_motor_min, min(pi_L2_motor_max, S.pi_L2_motor));
+S.pi_L1_plan = max(pi_L1_plan_min, min(pi_L1_plan_max, S.pi_L1_plan));
+S.pi_L2_plan = max(pi_L2_plan_min, min(pi_L2_plan_max, S.pi_L2_plan));
+
 % ------------------------------
 % REPRESENTATION UPDATES
 % ------------------------------
@@ -524,7 +605,23 @@ if length(S.L1_motor_error_history) > P.window_size
     S.L2_plan_error_history = S.L2_plan_error_history(end-P.window_size+1:end);
 end
 
-% Helper for generic precision update
+% Update pi values and diagnostics
+% FIX (Nov 2, 2025): REMOVED conflicting update_pi() application to actual precision values
+% The error-driven exponential scaling (implemented below) is now the PRIMARY mechanism.
+% update_pi() is called ONLY to compute diagnostic traces (raw1-raw4, d1-d4)
+% The actual precision values are updated via the exponential scaling mechanism below
+[~, raw1, d1] = update_pi(S.pi_L1_motor, S.pi_L1_motor_base, S.L1_motor_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
+[~, raw2, d2] = update_pi(S.pi_L2_motor, S.pi_L2_motor_base, S.L2_motor_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
+[~, raw3, d3] = update_pi(S.pi_L1_plan, S.pi_L1_plan_base, S.L1_plan_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
+[~, raw4, d4] = update_pi(S.pi_L2_plan, S.pi_L2_plan_base, S.L2_plan_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
+
+% Apply sensible clamps
+S.pi_L1_motor = max(1, min(1000, S.pi_L1_motor));
+S.pi_L2_motor = max(0.1, min(100, S.pi_L2_motor));
+S.pi_L1_plan = max(1, min(1000, S.pi_L1_plan));
+S.pi_L2_plan = max(0.1, min(100, S.pi_L2_plan));
+
+% Helper for diagnostic precision update (informational only, not applied to actual precision values)
 function [pi_new, raw_pi, denom] = update_pi(pi_curr, pi_base, err_history, smooth_alpha, max_ratio)
     if length(err_history) > 10
         err_val = err_history(end);
@@ -546,17 +643,71 @@ function [pi_new, raw_pi, denom] = update_pi(pi_curr, pi_base, err_history, smoo
     end
 end
 
-% Update pi values and diagnostics
-[S.pi_L1_motor, raw1, d1] = update_pi(S.pi_L1_motor, S.pi_L1_motor_base, S.L1_motor_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
-[S.pi_L2_motor, raw2, d2] = update_pi(S.pi_L2_motor, S.pi_L2_motor_base, S.L2_motor_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
-[S.pi_L1_plan, raw3, d3] = update_pi(S.pi_L1_plan, S.pi_L1_plan_base, S.L1_plan_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
-[S.pi_L2_plan, raw4, d4] = update_pi(S.pi_L2_plan, S.pi_L2_plan_base, S.L2_plan_error_history, P.pi_smooth_alpha, P.pi_max_step_ratio);
+% ======================================================================
+% PREDICTION-ERROR-DRIVEN ADAPTIVE PRECISION (NEW - Nov 2, 2025)
+% ======================================================================
+% Core principle: precision_new = precision_old * exp(alpha * error_magnitude)
+% - High error → increase precision (tighter bounds, restrict predictions)
+% - Low error  → decrease precision (relax bounds, allow exploration)
+%
+% Neuroscientific basis: Matches gain modulation in cortex in response to
+% prediction errors; related to uncertainty-driven learning (Friston, 2010)
 
-% Apply sensible clamps
-S.pi_L1_motor = max(1, min(1000, S.pi_L1_motor));
-S.pi_L2_motor = max(0.1, min(100, S.pi_L2_motor));
-S.pi_L1_plan = max(1, min(1000, S.pi_L1_plan));
-S.pi_L2_plan = max(0.1, min(100, S.pi_L2_plan));
+if isfield(P, 'alpha_precision_gain') && isfield(P, 'pi_bounds')
+    alpha_gain = P.alpha_precision_gain;  % Sensitivity to error magnitude
+    
+    % Extract precision bounds from P struct
+    pi_L1_motor_min = P.pi_bounds.L1_motor(1);
+    pi_L1_motor_max = P.pi_bounds.L1_motor(2);
+    pi_L2_motor_min = P.pi_bounds.L2_motor(1);
+    pi_L2_motor_max = P.pi_bounds.L2_motor(2);
+    pi_L1_plan_min = P.pi_bounds.L1_plan(1);
+    pi_L1_plan_max = P.pi_bounds.L1_plan(2);
+    pi_L2_plan_min = P.pi_bounds.L2_plan(1);
+    pi_L2_plan_max = P.pi_bounds.L2_plan(2);
+    
+    % Cap error magnitudes to prevent numerical overflow
+    max_error_cap = 10.0;
+    L1_motor_error_mag_capped = min(L1_motor_error_mag, max_error_cap);
+    L2_motor_error_mag_capped = min(L2_motor_error_mag, max_error_cap);
+    L1_plan_error_mag_capped = min(L1_plan_error_mag, max_error_cap);
+    L2_plan_error_mag_capped = min(L2_plan_error_mag, max_error_cap);
+    
+    % Compute multiplicative precision scale factors using exponential
+    % precision_scale = exp(alpha * error_magnitude)
+    % This keeps scales in a reasonable range even with large errors
+    precision_scale_L1_motor = exp(alpha_gain * L1_motor_error_mag_capped);
+    precision_scale_L2_motor = exp(alpha_gain * L2_motor_error_mag_capped);
+    precision_scale_L1_plan = exp(alpha_gain * L1_plan_error_mag_capped);
+    precision_scale_L2_plan = exp(alpha_gain * L2_plan_error_mag_capped);
+    
+    % Apply error-driven scaling to precisions
+    % This acts as an adaptive gain modulation layer on top of the
+    % existing update_pi dynamics
+    S.pi_L1_motor = S.pi_L1_motor * precision_scale_L1_motor;
+    S.pi_L2_motor = S.pi_L2_motor * precision_scale_L2_motor;
+    S.pi_L1_plan = S.pi_L1_plan * precision_scale_L1_plan;
+    S.pi_L2_plan = S.pi_L2_plan * precision_scale_L2_plan;
+    
+    % Apply user-specified bounds to prevent runaway precision values
+    S.pi_L1_motor = max(pi_L1_motor_min, min(pi_L1_motor_max, S.pi_L1_motor));
+    S.pi_L2_motor = max(pi_L2_motor_min, min(pi_L2_motor_max, S.pi_L2_motor));
+    S.pi_L1_plan = max(pi_L1_plan_min, min(pi_L1_plan_max, S.pi_L1_plan));
+    S.pi_L2_plan = max(pi_L2_plan_min, min(pi_L2_plan_max, S.pi_L2_plan));
+    
+    % Store precision scaling factors for diagnostics (optional)
+    if ~isfield(S, 'pi_scale_history')
+        S.pi_scale_history = struct();
+        S.pi_scale_history.L1_motor = [];
+        S.pi_scale_history.L2_motor = [];
+        S.pi_scale_history.L1_plan = [];
+        S.pi_scale_history.L2_plan = [];
+    end
+    S.pi_scale_history.L1_motor(i) = precision_scale_L1_motor;
+    S.pi_scale_history.L2_motor(i) = precision_scale_L2_motor;
+    S.pi_scale_history.L1_plan(i) = precision_scale_L1_plan;
+    S.pi_scale_history.L2_plan(i) = precision_scale_L2_plan;
+end
 
 % Diagnostics
 S.pi_trace_L1_motor(i) = S.pi_L1_motor; S.pi_raw_trace_L1_motor(i) = raw1; S.denom_trace_L1_motor(i) = d1;
