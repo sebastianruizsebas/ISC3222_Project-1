@@ -424,7 +424,7 @@ end
 
 % Layer dimensions (needed later when initializing representations)
 % NOTE: scale_factor controls how much to enlarge internal layers.
-scale_factor = 20.0;  % 2000% -> 20x
+scale_factor = 10.0;  % 1000% -> 10x
 
 n_L0 = n_trials;        % One-hot encoding: which trial/task is active
 n_L1_motor = 7;         % keep L1 semantics [x,y,z,vx,vy,vz,bias] unchanged
