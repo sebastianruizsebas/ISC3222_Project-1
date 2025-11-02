@@ -401,27 +401,37 @@ for iteration = 1:num_iterations
                 end
                 avg_final = mean(trial_final);
                 
-                % EARLY TERMINATION PENALTY (NEW - Nov 1, 2025)
-                % If the trial was terminated early (e.g., due to Inf/NaN clipping),
-                % penalize it heavily to avoid PSO converging on those parameters
+                % EARLY TERMINATION PENALTY (robust)
+                % If the run terminated early, compute completion ratio using
+                % the returned termination_step vs expected total steps and
+                % apply a large penalty proportional to incompleteness.
                 early_term_penalty = 0;
+                try
+                    expected_total_steps = phases_indices_local{end}(end); % expected last index
+                catch
+                    expected_total_steps = numel(interception_error_all);
+                end
+
                 if isfield(res, 'early_termination') && res.early_termination
-                    % Compute completion ratio: how many steps vs. total attempted
-                    total_steps = length(interception_error_all_local);
-                    if total_steps > 0
-                        % Penalize based on incompleteness: 0-100 penalty based on %missing
-                        completion_ratio = (total_steps - 1) / max(1, length(interception_error_all_local));
-                        early_term_penalty = 100.0 * (1.0 - max(0, min(1, completion_ratio)));
+                    % termination_step should be set by the simulation; fallback to 0
+                    if isfield(res, 'termination_step') && isfinite(res.termination_step) && res.termination_step > 0
+                        term_step = res.termination_step;
                     else
-                        early_term_penalty = 100.0;  % Maximum penalty if almost no steps executed
+                        term_step = 0;
                     end
-                    
-                    % Add severe penalty if quit due to Inf/NaN clipping (not just normal end)
+                    completion_ratio = max(0, min(1, term_step / max(1, expected_total_steps)));
+
+                    % Base penalty (large relative to typical reaching errors)
+                    base_penalty = 1e3;
+                    early_term_penalty = base_penalty * (1.0 - completion_ratio);
+
+                    % Severe penalty for clipping / NaN-driven terminations
                     if isfield(res, 'termination_reason') && contains(res.termination_reason, 'Excessive')
-                        early_term_penalty = early_term_penalty + 500.0;  % Severe penalty
+                        early_term_penalty = early_term_penalty + 1e6;
                     end
                 end
-                
+
+                % Final score: mean final error plus early-termination penalty
                 scores(p) = avg_final + early_term_penalty;
                 loaded_data_cell{p} = res;
             else
