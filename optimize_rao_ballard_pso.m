@@ -38,7 +38,7 @@ fprintf('  Total model evaluations: %d\n\n', total_evals);
 % PSO hyperparameters (standard values)
 w = 0.7;        % Inertia weight (controls momentum of particles)
 c1 = 0.8;       % Cognitive parameter (attraction to particle's best)
-c2 = 0.8;       % Social parameter (attraction to swarm's best)
+c2 = 1.5;       % Social parameter (attraction to swarm's best)
 noise_scale = 0.1;  % Noise scale for stochastic perturbations (10% of parameter range)
 
 fprintf('PSO HYPERPARAMETERS:\n');
@@ -124,7 +124,7 @@ param_bounds.pi_L2_plan_max.max = 100;
 % For 3D reaching, primary metric is reaching distance improvement
 objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
 
-fprintf('PARAMETER SEARCH SPACE (19-DIMENSIONAL - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
+fprintf('PARAMETER SEARCH SPACE (15-DIMENSIONAL - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
 fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
 fprintf('LEARNING RATES:\n');
 fprintf('  eta_rep:  [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
@@ -295,7 +295,12 @@ fprintf('✓ Maximizes exploration of 15D parameter space\n\n');
 
 % Initialize global best tracking BEFORE PSO loop
 global_best_score = inf;
-global_best_params = struct();
+global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, ...
+    'weight_decay', nan, 'decay_motor', nan, 'decay_plan', nan, ...
+    'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, ...
+    'W_motor_gain', nan, 'W_plan_gain', nan, 'interference_penalty_weight', nan, ...
+    'alpha_precision_gain', nan, 'pi_L1_motor_max', nan, 'pi_L2_motor_max', nan, ...
+    'pi_L1_plan_max', nan, 'pi_L2_plan_max', nan);
 
 % ====================================================================
 % PSO MAIN LOOP
