@@ -181,188 +181,117 @@ fprintf('  Position RMSE:                 %.1f\n\n', objective_weights.position_
 % ====================================================================
 
 fprintf('═══════════════════════════════════════════════════════════════\n');
-fprintf('Initializing particle swarm with SPREAD-OUT initialization...\n\n');
+fprintf('Initializing particle swarm with TRUE LATIN HYPERCUBE SAMPLING...\n\n');
 
-% Initialize particle positions (SPREAD OUT across entire parameter space)
+% Create LHS design (90 x 15 matrix of stratified random samples in [0,1])
+% Each column is one dimension (parameter), each row is one particle
+% LHS guarantees: each dimension divided into 90 bins, exactly one particle per bin
+n_params = 15;  % Number of parameters to optimize
+
+% Generate Latin Hypercube Sample
+lhs_design = lhsdesign(num_particles, n_params, 'criterion', 'maximin');
+% lhs_design is 90x15, each entry in [0,1], guaranteed stratified coverage
+
+% Map LHS design [0,1] to actual parameter ranges
+param_names = {'eta_rep', 'eta_W', 'momentum', 'weight_decay', ...
+    'decay_motor', 'decay_plan', 'motor_gain', 'damping', ...
+    'reaching_speed_scale', 'W_motor_gain', 'W_plan_gain', ...
+    'interference_penalty_weight', 'alpha_precision_gain', ...
+    'pi_L1_motor_max', 'pi_L2_motor_max', 'pi_L1_plan_max', 'pi_L2_plan_max'};
+
+% Create mapping from LHS columns to parameter bounds
+param_mapping = cell(n_params, 1);
+param_mapping{1} = struct('name', 'eta_rep', 'log_scale', true, ...
+    'min', param_bounds.eta_rep.log_min, 'max', param_bounds.eta_rep.log_max);
+param_mapping{2} = struct('name', 'eta_W', 'log_scale', true, ...
+    'min', param_bounds.eta_W.log_min, 'max', param_bounds.eta_W.log_max);
+param_mapping{3} = struct('name', 'momentum', 'log_scale', false, ...
+    'min', param_bounds.momentum.min, 'max', param_bounds.momentum.max);
+param_mapping{4} = struct('name', 'weight_decay', 'log_scale', false, ...
+    'min', param_bounds.weight_decay.min, 'max', param_bounds.weight_decay.max);
+param_mapping{5} = struct('name', 'decay_motor', 'log_scale', false, ...
+    'min', param_bounds.decay_motor.min, 'max', param_bounds.decay_motor.max);
+param_mapping{6} = struct('name', 'decay_plan', 'log_scale', false, ...
+    'min', param_bounds.decay_plan.min, 'max', param_bounds.decay_plan.max);
+param_mapping{7} = struct('name', 'motor_gain', 'log_scale', false, ...
+    'min', param_bounds.motor_gain.min, 'max', param_bounds.motor_gain.max);
+param_mapping{8} = struct('name', 'damping', 'log_scale', false, ...
+    'min', param_bounds.damping.min, 'max', param_bounds.damping.max);
+param_mapping{9} = struct('name', 'reaching_speed_scale', 'log_scale', false, ...
+    'min', param_bounds.reaching_speed_scale.min, 'max', param_bounds.reaching_speed_scale.max);
+param_mapping{10} = struct('name', 'W_motor_gain', 'log_scale', false, ...
+    'min', param_bounds.W_motor_gain.min, 'max', param_bounds.W_motor_gain.max);
+param_mapping{11} = struct('name', 'W_plan_gain', 'log_scale', false, ...
+    'min', param_bounds.W_plan_gain.min, 'max', param_bounds.W_plan_gain.max);
+param_mapping{12} = struct('name', 'interference_penalty_weight', 'log_scale', false, ...
+    'min', param_bounds.interference_penalty_weight.min, 'max', param_bounds.interference_penalty_weight.max);
+param_mapping{13} = struct('name', 'alpha_precision_gain', 'log_scale', false, ...
+    'min', param_bounds.alpha_precision_gain.min, 'max', param_bounds.alpha_precision_gain.max);
+param_mapping{14} = struct('name', 'pi_L1_motor_max', 'log_scale', false, ...
+    'min', param_bounds.pi_L1_motor_max.min, 'max', param_bounds.pi_L1_motor_max.max);
+param_mapping{15} = struct('name', 'pi_L2_motor_max', 'log_scale', false, ...
+    'min', param_bounds.pi_L2_motor_max.min, 'max', param_bounds.pi_L2_motor_max.max);
+
+% Note: Only 15 parameters (removed pi_*_min which are hard-coded)
+% Adjust mapping size if needed
+if numel(param_mapping) > n_params
+    param_mapping = param_mapping(1:n_params);
+end
+
+% Initialize particles using LHS design
 particles = struct();
 for p = 1:num_particles
-    % Use Latin hypercube or stratified sampling for better spread
-    % Divide parameter space into cells for each particle
+    % For each parameter, map LHS value [0,1] to actual parameter range
+    for d = 1:n_params
+        lhs_val = lhs_design(p, d);  % Value in [0,1] for this particle and dimension
+        param_info = param_mapping{d};
+        
+        % Map from [0,1] to parameter range
+        if param_info.log_scale
+            % Log scale: [0,1] -> [log_min, log_max] -> [10^log_min, 10^log_max]
+            log_val = param_info.min + lhs_val * (param_info.max - param_info.min);
+            param_val = 10^log_val;
+        else
+            % Linear scale: [0,1] -> [min, max]
+            param_val = param_info.min + lhs_val * (param_info.max - param_info.min);
+        end
+        
+        % Assign to particle
+        particles(p).(param_info.name) = param_val;
+    end
     
-    % LEARNING RATES
-    % eta_rep: spread particles across log scale
-    log_eta_rep_min = param_bounds.eta_rep.log_min;
-    log_eta_rep_max = param_bounds.eta_rep.log_max;
-    log_eta_rep_cell = log_eta_rep_min + (p-1) * (log_eta_rep_max - log_eta_rep_min) / num_particles;
-    log_eta_rep = log_eta_rep_cell + rand() * (log_eta_rep_max - log_eta_rep_min) / num_particles;
-    particles(p).eta_rep = 10^log_eta_rep;
+    % Initialize velocities (larger range for exploration)
+    % Velocities in [0,1] space for LHS dimensions
+    for d = 1:n_params
+        param_info = param_mapping{d};
+        vel_range = 2.0;  % Velocity range in parameter space
+        
+        if param_info.log_scale
+            % Log scale velocity
+            vel_val = -vel_range + rand() * 2 * vel_range;
+            vel_field = sprintf('vel_%s', param_info.name);
+            particles(p).(vel_field) = vel_val;
+        else
+            % Linear scale velocity
+            param_range = param_info.max - param_info.min;
+            vel_val = -vel_range * param_range + rand() * 2 * vel_range * param_range;
+            vel_field = sprintf('vel_%s', param_info.name);
+            particles(p).(vel_field) = vel_val;
+        end
+    end
     
-    % eta_W: spread particles across log scale
-    log_eta_W_min = param_bounds.eta_W.log_min;
-    log_eta_W_max = param_bounds.eta_W.log_max;
-    log_eta_W_cell = log_eta_W_min + (p-1) * (log_eta_W_max - log_eta_W_min) / num_particles;
-    log_eta_W = log_eta_W_cell + rand() * (log_eta_W_max - log_eta_W_min) / num_particles;
-    particles(p).eta_W = 10^log_eta_W;
-    
-    % momentum: spread particles linearly
-    mom_min = param_bounds.momentum.min;
-    mom_max = param_bounds.momentum.max;
-    mom_cell = mom_min + (p-1) * (mom_max - mom_min) / num_particles;
-    particles(p).momentum = mom_cell + rand() * (mom_max - mom_min) / num_particles;
-    
-    % WEIGHT DECAY (global)
-    wd_min = param_bounds.weight_decay.min;
-    wd_max = param_bounds.weight_decay.max;
-    wd_cell = wd_min + (p-1) * (wd_max - wd_min) / num_particles;
-    particles(p).weight_decay = wd_cell + rand() * (wd_max - wd_min) / num_particles;
-    
-    % TASK-CONDITIONAL DECAY RATES (NEW - Nov 1, 2025)
-    % decay_motor: preserve stable motor dynamics across tasks
-    dm_min = param_bounds.decay_motor.min;
-    dm_max = param_bounds.decay_motor.max;
-    dm_cell = dm_min + (p-1) * (dm_max - dm_min) / num_particles;
-    particles(p).decay_motor = dm_cell + rand() * (dm_max - dm_min) / num_particles;
-    
-    % decay_plan: allow planning region to forget old task-specific targets
-    dp_min = param_bounds.decay_plan.min;
-    dp_max = param_bounds.decay_plan.max;
-    dp_cell = dp_min + (p-1) * (dp_max - dp_min) / num_particles;
-    particles(p).decay_plan = dp_cell + rand() * (dp_max - dp_min) / num_particles;
-    
-    % MOTOR DYNAMICS
-    mg_min = param_bounds.motor_gain.min;
-    mg_max = param_bounds.motor_gain.max;
-    mg_cell = mg_min + (p-1) * (mg_max - mg_min) / num_particles;
-    particles(p).motor_gain = mg_cell + rand() * (mg_max - mg_min) / num_particles;
-    
-    damp_min = param_bounds.damping.min;
-    damp_max = param_bounds.damping.max;
-    damp_cell = damp_min + (p-1) * (damp_max - damp_min) / num_particles;
-    particles(p).damping = damp_cell + rand() * (damp_max - damp_min) / num_particles;
-    
-    rss_min = param_bounds.reaching_speed_scale.min;
-    rss_max = param_bounds.reaching_speed_scale.max;
-    rss_cell = rss_min + (p-1) * (rss_max - rss_min) / num_particles;
-    particles(p).reaching_speed_scale = rss_cell + rand() * (rss_max - rss_min) / num_particles;
-    
-    % WEIGHT INITIALIZATION GAINS (NEW format - Nov 1, 2025)
-    % Motor weight initialization
-    wm_min = param_bounds.W_motor_gain.min;
-    wm_max = param_bounds.W_motor_gain.max;
-    wm_cell = wm_min + (p-1) * (wm_max - wm_min) / num_particles;
-    particles(p).W_motor_gain = wm_cell + rand() * (wm_max - wm_min) / num_particles;
-    
-    % Planning weight initialization
-    wp_min = param_bounds.W_plan_gain.min;
-    wp_max = param_bounds.W_plan_gain.max;
-    wp_cell = wp_min + (p-1) * (wp_max - wp_min) / num_particles;
-    particles(p).W_plan_gain = wp_cell + rand() * (wp_max - wp_min) / num_particles;
-    
-    % TASK-CONDITIONAL LEARNING - INTERFERENCE PENALTY (NEW - Nov 1, 2025)
-    ipw_min = param_bounds.interference_penalty_weight.min;
-    ipw_max = param_bounds.interference_penalty_weight.max;
-    ipw_cell = ipw_min + (p-1) * (ipw_max - ipw_min) / num_particles;
-    particles(p).interference_penalty_weight = ipw_cell + rand() * (ipw_max - ipw_min) / num_particles;
-    
-    % ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025)
-    % alpha_precision_gain: sensitivity to prediction error magnitude
-    apg_min = param_bounds.alpha_precision_gain.min;
-    apg_max = param_bounds.alpha_precision_gain.max;
-    apg_cell = apg_min + (p-1) * (apg_max - apg_min) / num_particles;
-    particles(p).alpha_precision_gain = apg_cell + rand() * (apg_max - apg_min) / num_particles;
-    
-    % Precision bounds for L1 motor (only max is optimized, min is hard-coded in main script)
-    pi_L1m_max_min = param_bounds.pi_L1_motor_max.min;
-    pi_L1m_max_max = param_bounds.pi_L1_motor_max.max;
-    pi_L1m_max_cell = pi_L1m_max_min + (p-1) * (pi_L1m_max_max - pi_L1m_max_min) / num_particles;
-    particles(p).pi_L1_motor_max = pi_L1m_max_cell + rand() * (pi_L1m_max_max - pi_L1m_max_min) / num_particles;
-    
-    % Precision bounds for L2 motor (only max is optimized, min is hard-coded in main script)
-    pi_L2m_max_min = param_bounds.pi_L2_motor_max.min;
-    pi_L2m_max_max = param_bounds.pi_L2_motor_max.max;
-    pi_L2m_max_cell = pi_L2m_max_min + (p-1) * (pi_L2m_max_max - pi_L2m_max_min) / num_particles;
-    particles(p).pi_L2_motor_max = pi_L2m_max_cell + rand() * (pi_L2m_max_max - pi_L2m_max_min) / num_particles;
-    
-    % Precision bounds for L1 plan (only max is optimized, min is hard-coded in main script)
-    pi_L1p_max_min = param_bounds.pi_L1_plan_max.min;
-    pi_L1p_max_max = param_bounds.pi_L1_plan_max.max;
-    pi_L1p_max_cell = pi_L1p_max_min + (p-1) * (pi_L1p_max_max - pi_L1p_max_min) / num_particles;
-    particles(p).pi_L1_plan_max = pi_L1p_max_cell + rand() * (pi_L1p_max_max - pi_L1p_max_min) / num_particles;
-    
-    % Precision bounds for L2 plan (only max is optimized, min is hard-coded in main script)
-    pi_L2p_max_min = param_bounds.pi_L2_plan_max.min;
-    pi_L2p_max_max = param_bounds.pi_L2_plan_max.max;
-    pi_L2p_max_cell = pi_L2p_max_min + (p-1) * (pi_L2p_max_max - pi_L2p_max_min) / num_particles;
-    particles(p).pi_L2_plan_max = pi_L2p_max_cell + rand() * (pi_L2p_max_max - pi_L2p_max_min) / num_particles;
-    
-    % Initialize velocity with larger range for exploration
-    particles(p).vel_eta_rep = -2 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min) + ...
-        rand() * 4 * (param_bounds.eta_rep.log_max - param_bounds.eta_rep.log_min);
-    particles(p).vel_eta_W = -2 * (param_bounds.eta_W.log_max - param_bounds.eta_W.log_min) + ...
-        rand() * 4 * (param_bounds.eta_W.log_max - param_bounds.eta_W.log_min);
-    particles(p).vel_momentum = -2 * (param_bounds.momentum.max - param_bounds.momentum.min) + ...
-        rand() * 4 * (param_bounds.momentum.max - param_bounds.momentum.min);
-    particles(p).vel_weight_decay = -2 * (param_bounds.weight_decay.max - param_bounds.weight_decay.min) + ...
-        rand() * 4 * (param_bounds.weight_decay.max - param_bounds.weight_decay.min);
-    particles(p).vel_decay_motor = -2 * (param_bounds.decay_motor.max - param_bounds.decay_motor.min) + ...
-        rand() * 4 * (param_bounds.decay_motor.max - param_bounds.decay_motor.min);
-    particles(p).vel_decay_plan = -2 * (param_bounds.decay_plan.max - param_bounds.decay_plan.min) + ...
-        rand() * 4 * (param_bounds.decay_plan.max - param_bounds.decay_plan.min);
-    particles(p).vel_motor_gain = -2 * (param_bounds.motor_gain.max - param_bounds.motor_gain.min) + ...
-        rand() * 4 * (param_bounds.motor_gain.max - param_bounds.motor_gain.min);
-    particles(p).vel_damping = -2 * (param_bounds.damping.max - param_bounds.damping.min) + ...
-        rand() * 4 * (param_bounds.damping.max - param_bounds.damping.min);
-    particles(p).vel_reaching_speed_scale = -2 * (param_bounds.reaching_speed_scale.max - param_bounds.reaching_speed_scale.min) + ...
-        rand() * 4 * (param_bounds.reaching_speed_scale.max - param_bounds.reaching_speed_scale.min);
-    particles(p).vel_W_motor_gain = -2 * (param_bounds.W_motor_gain.max - param_bounds.W_motor_gain.min) + ...
-        rand() * 4 * (param_bounds.W_motor_gain.max - param_bounds.W_motor_gain.min);
-    particles(p).vel_W_plan_gain = -2 * (param_bounds.W_plan_gain.max - param_bounds.W_plan_gain.min) + ...
-        rand() * 4 * (param_bounds.W_plan_gain.max - param_bounds.W_plan_gain.min);
-    particles(p).vel_interference_penalty_weight = -2 * (param_bounds.interference_penalty_weight.max - param_bounds.interference_penalty_weight.min) + ...
-        rand() * 4 * (param_bounds.interference_penalty_weight.max - param_bounds.interference_penalty_weight.min);
-    particles(p).vel_alpha_precision_gain = -2 * (param_bounds.alpha_precision_gain.max - param_bounds.alpha_precision_gain.min) + ...
-        rand() * 4 * (param_bounds.alpha_precision_gain.max - param_bounds.alpha_precision_gain.min);
-    particles(p).vel_pi_L1_motor_max = -2 * (param_bounds.pi_L1_motor_max.max - param_bounds.pi_L1_motor_max.min) + ...
-        rand() * 4 * (param_bounds.pi_L1_motor_max.max - param_bounds.pi_L1_motor_max.min);
-    particles(p).vel_pi_L2_motor_max = -2 * (param_bounds.pi_L2_motor_max.max - param_bounds.pi_L2_motor_max.min) + ...
-        rand() * 4 * (param_bounds.pi_L2_motor_max.max - param_bounds.pi_L2_motor_max.min);
-    particles(p).vel_pi_L1_plan_max = -2 * (param_bounds.pi_L1_plan_max.max - param_bounds.pi_L1_plan_max.min) + ...
-        rand() * 4 * (param_bounds.pi_L1_plan_max.max - param_bounds.pi_L1_plan_max.min);
-    particles(p).vel_pi_L2_plan_max = -2 * (param_bounds.pi_L2_plan_max.max - param_bounds.pi_L2_plan_max.min) + ...
-        rand() * 4 * (param_bounds.pi_L2_plan_max.max - param_bounds.pi_L2_plan_max.min);
-    
-    % Initialize particle's best position and score
-    particles(p).best_eta_rep = particles(p).eta_rep;
-    particles(p).best_eta_W = particles(p).eta_W;
-    particles(p).best_momentum = particles(p).momentum;
-    particles(p).best_weight_decay = particles(p).weight_decay;
-    particles(p).best_decay_motor = particles(p).decay_motor;
-    particles(p).best_decay_plan = particles(p).decay_plan;
-    particles(p).best_motor_gain = particles(p).motor_gain;
-    particles(p).best_damping = particles(p).damping;
-    particles(p).best_reaching_speed_scale = particles(p).reaching_speed_scale;
-    particles(p).best_W_motor_gain = particles(p).W_motor_gain;
-    particles(p).best_W_plan_gain = particles(p).W_plan_gain;
-    particles(p).best_interference_penalty_weight = particles(p).interference_penalty_weight;
-    particles(p).best_alpha_precision_gain = particles(p).alpha_precision_gain;
-    particles(p).best_pi_L1_motor_max = particles(p).pi_L1_motor_max;
-    particles(p).best_pi_L2_motor_max = particles(p).pi_L2_motor_max;
-    particles(p).best_pi_L1_plan_max = particles(p).pi_L1_plan_max;
-    particles(p).best_pi_L2_plan_max = particles(p).pi_L2_plan_max;
+    % Initialize personal best tracking
+    for d = 1:n_params
+        param_info = param_mapping{d};
+        particles(p).(sprintf('best_%s', param_info.name)) = particles(p).(param_info.name);
+    end
     particles(p).best_score = inf;
 end
 
-% Global best tracking
-    global_best_score = inf;
-    global_best_params = struct('eta_rep', nan, 'eta_W', nan, 'momentum', nan, 'weight_decay', nan, ...
-        'decay_motor', nan, 'decay_plan', nan, 'motor_gain', nan, 'damping', nan, 'reaching_speed_scale', nan, ...
-        'W_motor_gain', nan, 'W_plan_gain', nan, 'interference_penalty_weight', nan, ...
-        'alpha_precision_gain', nan, ...
-        'pi_L1_motor_max', nan, 'pi_L2_motor_max', nan, 'pi_L1_plan_max', nan, 'pi_L2_plan_max', nan);
-    % NOTE: Removed pi_*_motor_min and pi_*_plan_min (hard-coded in main script)
-
-fprintf('Swarm initialized with %d SPREAD-OUT particles.\n', num_particles);
-fprintf('Particles distributed across entire parameter space (stratified sampling).\n\n');
+fprintf('✓ Swarm initialized with %d particles using LATIN HYPERCUBE SAMPLING (LHS)\n', num_particles);
+fprintf('✓ LHS guarantees stratified coverage across all 15 dimensions\n');
+fprintf('✓ Each dimension divided into %d bins (one particle per bin)\n', num_particles);
+fprintf('✓ Maximizes exploration of 15D parameter space\n\n');
 
 % ====================================================================
 % PSO MAIN LOOP
