@@ -330,7 +330,8 @@ else
 end
 
 % Check if we've hit the termination threshold (50 consecutive Inf/NaN events)
-MAX_CONSECUTIVE_CLIPPING = 50;
+% INCREASED to 200 on Nov 1, 2025 to enforce minimum trial duration
+MAX_CONSECUTIVE_CLIPPING = 200;
 if consecutive_clipping_count >= MAX_CONSECUTIVE_CLIPPING
     fprintf(2, '\n⚠  CRITICAL: %d consecutive Inf/NaN clipping events detected! Terminating trial early.\n', consecutive_clipping_count);
     S.session_end = true;

@@ -370,7 +370,29 @@ for iteration = 1:num_iterations
                     trial_final(tt) = interception_error_all_local(idx_range(end));
                 end
                 avg_final = mean(trial_final);
-                scores(p) = avg_final;
+                
+                % EARLY TERMINATION PENALTY (NEW - Nov 1, 2025)
+                % If the trial was terminated early (e.g., due to Inf/NaN clipping),
+                % penalize it heavily to avoid PSO converging on those parameters
+                early_term_penalty = 0;
+                if isfield(res, 'early_termination') && res.early_termination
+                    % Compute completion ratio: how many steps vs. total attempted
+                    total_steps = length(interception_error_all_local);
+                    if total_steps > 0
+                        % Penalize based on incompleteness: 0-100 penalty based on %missing
+                        completion_ratio = (total_steps - 1) / max(1, length(interception_error_all_local));
+                        early_term_penalty = 100.0 * (1.0 - max(0, min(1, completion_ratio)));
+                    else
+                        early_term_penalty = 100.0;  % Maximum penalty if almost no steps executed
+                    end
+                    
+                    % Add severe penalty if quit due to Inf/NaN clipping (not just normal end)
+                    if isfield(res, 'termination_reason') && contains(res.termination_reason, 'Excessive')
+                        early_term_penalty = early_term_penalty + 500.0;  % Severe penalty
+                    end
+                end
+                
+                scores(p) = avg_final + early_term_penalty;
                 loaded_data_cell{p} = res;
             else
                 scores(p) = inf;
