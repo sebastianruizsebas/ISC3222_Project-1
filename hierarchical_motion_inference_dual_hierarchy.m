@@ -88,7 +88,7 @@ end
 
 % Timing defaults (can be overridden by params)
 dt = 0.01;              % Time step (s)
-T_per_trial = 50;      % Duration per trial (s) - smaller default for quicker runs
+T_per_trial = 20;      % Duration per trial (s) - smaller default for quicker runs
 n_trials = 1;           % Number of different ball trajectories
 
 if nargin > 0 && isstruct(params)
