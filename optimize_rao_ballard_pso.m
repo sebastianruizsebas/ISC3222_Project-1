@@ -41,11 +41,6 @@ c1 = 0.8;       % Cognitive parameter (attraction to particle's best)
 c2 = 1.5;       % Social parameter (attraction to swarm's best)
 noise_scale = 0.1;  % Noise scale for stochastic perturbations (10% of parameter range)
 
-fprintf('PSO HYPERPARAMETERS:\n');
-fprintf('  Inertia weight (w): %.2f\n', w);
-fprintf('  Cognitive parameter (c1): %.2f\n', c1);
-fprintf('  Social parameter (c2): %.2f\n', c2);
-fprintf('  Noise scale (stochastic exploration): %.2f\n\n', noise_scale);
 
 % ====================================================================
 % DEFINE SEARCH SPACE FOR PARAMETERS
@@ -124,16 +119,13 @@ param_bounds.pi_L2_plan_max.max = 100;
 % For 3D reaching, primary metric is reaching distance improvement
 objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
 
-fprintf('PARAMETER SEARCH SPACE (CONFIGURED - WITH ERROR-DRIVEN ADAPTIVE PRECISION):\n');
-fprintf('═══════════════════════════════════════════════════════════════════════════════\n');
 fprintf('LEARNING RATES:\n');
-fprintf('  eta_rep:  [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
+fprintf('  eta_rep:  [%.6f, %.6f]\n', ...
     10^param_bounds.eta_rep.log_min, 10^param_bounds.eta_rep.log_max, ...
     param_bounds.eta_rep.log_min, param_bounds.eta_rep.log_max);
-fprintf('  eta_W:    [%.6f, %.6f] (log scale: 10^[%d, %d])\n', ...
-    10^param_bounds.eta_W.log_min, 10^param_bounds.eta_W.log_max, ...
-    param_bounds.eta_W.log_min, param_bounds.eta_W.log_max);
-fprintf('  momentum: [%.2f, %.2f] (linear scale)\n', ...
+fprintf('  eta_W:    [%.6f, %.6f] \n', ...
+    10^param_bounds.eta_W.log_min, 10^param_bounds.eta_W.log_max);
+fprintf('  momentum: [%.2f, %.2f]\n', ...
     param_bounds.momentum.min, param_bounds.momentum.max);
 
 fprintf('WEIGHT DECAY:\n');
@@ -141,9 +133,9 @@ fprintf('  weight_decay (global): [%.3f, %.3f]\n', ...
     param_bounds.weight_decay.min, param_bounds.weight_decay.max);
 
 fprintf('TASK-CONDITIONAL DECAY RATES (NEW - Nov 1, 2025):\n');
-fprintf('  decay_motor:  [%.2f, %.2f] (motor: preserve across tasks)\n', ...
+fprintf('  decay_motor:  [%.2f, %.2f]\n', ...
     param_bounds.decay_motor.min, param_bounds.decay_motor.max);
-fprintf('  decay_plan:   [%.2f, %.2f] (planning: forget old targets)\n', ...
+fprintf('  decay_plan:   [%.2f, %.2f]\n', ...
     param_bounds.decay_plan.min, param_bounds.decay_plan.max);
 
 fprintf('MOTOR DYNAMICS (trajectory quality):\n');
@@ -154,7 +146,7 @@ fprintf('  damping: [%.2f, %.2f]\n', ...
 fprintf('  reaching_speed_scale: [%.2f, %.2f]\n', ...
     param_bounds.reaching_speed_scale.min, param_bounds.reaching_speed_scale.max);
 
-fprintf('WEIGHT INITIALIZATION GAINS (convergence speed):\n');
+fprintf('WEIGHT INITIALIZATION GAINS :');
 
 fprintf('TASK-CONDITIONAL LEARNING - INTERFERENCE PENALTY (Nov 1, 2025):\n');
 fprintf('  interference_penalty_weight: [%.4f, %.4f]\n\n', ...
@@ -180,7 +172,6 @@ fprintf('  Position RMSE:                 %.1f\n\n', objective_weights.position_
 % INITIALIZE PARTICLE SWARM
 % ====================================================================
 
-fprintf('═══════════════════════════════════════════════════════════════\n');
 fprintf('Initializing particle swarm with TRUE LATIN HYPERCUBE SAMPLING...\n\n');
 
 % Create LHS design sized to the actual param list
@@ -292,8 +283,6 @@ end
 
 fprintf('✓ Swarm initialized with %d particles using LATIN HYPERCUBE SAMPLING (LHS)\n', num_particles);
 fprintf('✓ LHS guarantees stratified coverage across all %d dimensions\n', n_params);
-fprintf('✓ Each dimension divided into %d bins (one particle per bin)\n', num_particles);
-fprintf('✓ Maximizes exploration of %dD parameter space\n\n', n_params);
 
 % Initialize global best tracking BEFORE PSO loop
 global_best_score = inf;
@@ -327,7 +316,7 @@ debug_dt = 0.02;           % larger dt for faster debug runs
 
 for iteration = 1:num_iterations
     fprintf('\n╔════════════════════════════════════════════════════════════╗\n');
-    fprintf('║ PSO Iteration %d/%d (Evaluating %d particles)              ║\n', ...
+    fprintf('║❗❗❗❗❗❗❗❗ PSO Iteration %d/%d (Evaluating %d particles)              ║\n', ...
         iteration, num_iterations, num_particles);
     fprintf('╚════════════════════════════════════════════════════════════╝\n\n');
     
@@ -499,7 +488,7 @@ for iteration = 1:num_iterations
                     particles(p).best_pi_L2_plan_max = pb.pi_L2_plan_max;
                 end
             end
-            fprintf('    ★ Particle %d new personal best: %.6f\n', p, current_score);
+            fprintf('               😂 😃 Particle %d new personal best: %.6f\n', p, current_score);
         end
 
         % Update global best and save best simulation snapshot if improved
@@ -522,7 +511,7 @@ for iteration = 1:num_iterations
             global_best_params.pi_L2_motor_max = particles(p).pi_L2_motor_max;
             global_best_params.pi_L1_plan_max = particles(p).pi_L1_plan_max;
             global_best_params.pi_L2_plan_max = particles(p).pi_L2_plan_max;
-            fprintf('    ✯ NEW GLOBAL BEST (particle %d): %.6f ✯\n', p, global_best_score);
+            fprintf(' 😬 😁 😂 😃 NEW GLOBAL BEST (particle %d): %.6f ✯\n', p, global_best_score);
             try
                 out_dir = './figures'; if ~exist(out_dir, 'dir'), mkdir(out_dir); end
                 best_fname = fullfile(out_dir, '3D_dual_hierarchy_results_best.mat');
@@ -769,12 +758,6 @@ fprintf('    pi_L1_motor_max:           %.6f (motor L1 max precision)\n', global
 fprintf('    pi_L2_motor_max:           %.6f (motor L2 max precision)\n', global_best_params.pi_L2_motor_max);
 fprintf('    pi_L1_plan_max:            %.6f (planning L1 max precision)\n', global_best_params.pi_L1_plan_max);
 fprintf('    pi_L2_plan_max:            %.6f (planning L2 max precision)\n\n', global_best_params.pi_L2_plan_max);
-
-fprintf('HARD-CODED MINIMUMS (in main script):\n');
-fprintf('    pi_L1_motor_min:           10 (motor L1 min precision)\n');
-fprintf('    pi_L2_motor_min:           1  (motor L2 min precision)\n');
-fprintf('    pi_L1_plan_min:            10 (planning L1 min precision)\n');
-fprintf('    pi_L2_plan_min:            1  (planning L2 min precision)\n\n');
 
 % Create results struct for saving
 results = struct();
