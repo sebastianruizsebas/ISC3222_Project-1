@@ -22,12 +22,12 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 50;  % Each particle = one parameter set
+num_particles = 90;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 80;  % Each iteration = all particles tested
+num_iterations = 90;  % Each iteration = all particles tested
 
-% Total evaluations will be: num_particles * num_iterations = 4000 trials
+% Total evaluations will be: num_particles * num_iterations = 7200 trials
 total_evals = num_particles * num_iterations;
 
 fprintf('PSO CONFIGURATION:\n');
@@ -37,7 +37,7 @@ fprintf('  Total model evaluations: %d\n\n', total_evals);
 
 % PSO hyperparameters (standard values)
 w = 0.7;        % Inertia weight (controls momentum of particles)
-c1 = 1.5;       % Cognitive parameter (attraction to particle's best)
+c1 = 0.8;       % Cognitive parameter (attraction to particle's best)
 c2 = 0.8;       % Social parameter (attraction to swarm's best)
 noise_scale = 0.1;  % Noise scale for stochastic perturbations (10% of parameter range)
 
