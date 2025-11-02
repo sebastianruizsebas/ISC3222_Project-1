@@ -22,10 +22,10 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 150;  % Each particle = one parameter set
+num_particles = 200;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 90;  % Each iteration = all particles tested
+num_iterations = 30;  % Each iteration = all particles tested
 
 % Total evaluations will be: num_particles * num_iterations * N_trials (in main script/ 2) = 27000 trials
 total_evals = num_particles * num_iterations * 2;
@@ -429,12 +429,17 @@ for iteration = 1:num_iterations
                 loaded_data_cell{p} = struct();
             end
 
-            personal_best_params_cell{p} = struct('eta_rep', particles(p).eta_rep, 'eta_W', particles(p).eta_W, ...
+            personal_best_params_cell{p} = struct( ...
+                'eta_rep', particles(p).eta_rep, 'eta_W', particles(p).eta_W, ...
                 'momentum', particles(p).momentum, 'weight_decay', particles(p).weight_decay, ...
                 'decay_motor', particles(p).decay_motor, 'decay_plan', particles(p).decay_plan, ...
-                'motor_gain', particles(p).motor_gain, 'damping', particles(p).damping, 'reaching_speed_scale', particles(p).reaching_speed_scale, ...
+                'motor_gain', particles(p).motor_gain, 'damping', particles(p).damping, ...
+                'reaching_speed_scale', particles(p).reaching_speed_scale, ...
                 'W_motor_gain', particles(p).W_motor_gain, 'W_plan_gain', particles(p).W_plan_gain, ...
-                'interference_penalty_weight', particles(p).interference_penalty_weight);
+                'interference_penalty_weight', particles(p).interference_penalty_weight, ...
+                'alpha_precision_gain', particles(p).alpha_precision_gain, ...
+                'pi_L1_motor_max', particles(p).pi_L1_motor_max, 'pi_L2_motor_max', particles(p).pi_L2_motor_max, ...
+                'pi_L1_plan_max', particles(p).pi_L1_plan_max, 'pi_L2_plan_max', particles(p).pi_L2_plan_max );
 
         catch MEpar
             scores(p) = inf;
@@ -779,7 +784,7 @@ results.pso_social = c2;
 % BUILD TOP-20 LEADERBOARD (from particle personal bests)
 % ====================================================================
 try
-    n_leader = min(20, num_particles);
+    n_leader = min(200, num_particles);
     % Collect personal bests
     all_scores = zeros(num_particles,1);
     for pp = 1:num_particles
@@ -793,35 +798,71 @@ try
     leader_list = struct('score', cell(top_n,1), 'params', cell(top_n,1));
     for k = 1:top_n
         ip = idx(k);
+        % Build params struct dynamically from param_mapping names.
         ps = struct();
-        ps.eta_rep = particles(ip).best_eta_rep;
-        ps.eta_W = particles(ip).best_eta_W;
-        ps.momentum = particles(ip).best_momentum;
-        ps.weight_decay = particles(ip).best_weight_decay;
-        ps.decay_motor = particles(ip).best_decay_motor;
-        ps.decay_plan = particles(ip).best_decay_plan;
-        ps.motor_gain = particles(ip).best_motor_gain;
-        ps.damping = particles(ip).best_damping;
-        ps.reaching_speed_scale = particles(ip).best_reaching_speed_scale;
-        ps.W_motor_gain = particles(ip).best_W_motor_gain;
-        ps.W_plan_gain = particles(ip).best_W_plan_gain;
-        ps.interference_penalty_weight = particles(ip).best_interference_penalty_weight;
-
+        for d = 1:n_params
+            pname = param_mapping{d}.name;
+            best_field = sprintf('best_%s', pname);
+            if isfield(particles(ip), best_field) && ~isempty(particles(ip).(best_field))
+                ps.(pname) = particles(ip).(best_field);
+            elseif isfield(particles(ip), pname)
+                ps.(pname) = particles(ip).(pname);
+            else
+                ps.(pname) = NaN;
+            end
+        end
         leader_list(k).score = sorted_scores(k);
         leader_list(k).params = ps;
     end
 
     % Attach to results
-    results.top20 = leader_list;
+    results.leader_list = leader_list;
 
-    % Save leaderboard to figures dir
+    % Build per-parameter statistics (min/max) computed only over the TOP-N leaderboard
+    param_stats = struct();
+    for d = 1:n_params
+        pname = param_mapping{d}.name;
+        vals = nan(1, top_n);
+        for k = 1:top_n
+            if isfield(leader_list(k).params, pname)
+                vals(k) = leader_list(k).params.(pname);
+            else
+                vals(k) = NaN;
+            end
+        end
+        if all(isnan(vals))
+            observed_min = NaN;
+            observed_max = NaN;
+        else
+            observed_min = min(vals(~isnan(vals)));
+            observed_max = max(vals(~isnan(vals)));
+        end
+
+        % Convert bounds to actual numeric scale (handle log-scale params)
+        if param_mapping{d}.log_scale
+            bounds_min = 10^param_mapping{d}.min;
+            bounds_max = 10^param_mapping{d}.max;
+        else
+            bounds_min = param_mapping{d}.min;
+            bounds_max = param_mapping{d}.max;
+        end
+
+        param_stats.(pname) = struct( ...
+            'topN_observed_min', observed_min, ...
+            'topN_observed_max', observed_max, ...
+            'bounds_min', bounds_min, ...
+            'bounds_max', bounds_max, ...
+            'is_log', param_mapping{d}.log_scale );
+    end
+
+    % Save leaderboard + top-N param stats to figures dir
     out_dir = './figures';
     if ~exist(out_dir, 'dir'), mkdir(out_dir); end
-    top_fname = fullfile(out_dir, 'pso_top20_best_params.mat');
-    save(top_fname, 'leader_list');
+    top_fname = fullfile(out_dir, 'pso_top200_best_params.mat');
+    save(top_fname, 'leader_list', 'param_stats');
     fprintf('✓ Top %d PSO parameter sets saved: %s\n', top_n, top_fname);
 catch ME
-    fprintf('Warning: failed to build/save top-20 leaderboard: %s\n', ME.message);
+    fprintf('Warning: failed to build/save top-%d leaderboard: %s\n', n_leader, ME.message);
 end
 
 % Save results with timestamp
