@@ -702,8 +702,22 @@ P.idx_pos = idx_pos; P.idx_vel = idx_vel; P.idx_bias = idx_bias;
 % Pass adaptive precision parameters to helper
 P.alpha_precision_gain = alpha_precision_gain;
 P.pi_bounds = P_pi_bounds;  % Bounds for dynamic precision updates
-% FIX (Nov 2, 2025): Add missing interference_penalty_weight parameter
-P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight
+P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight;
+% Add max clipping events threshold (stop early if too many clipping events)
+if isfield(params, 'max_clipping_events')
+    P.max_clipping_events = params.max_clipping_events;
+else
+    P.max_clipping_events = 25; % default: stop after 25 clipping events
+end
+
+% Centralized threshold for consecutive NaN/Inf termination (single-source)
+% Backwards compatible: if params.max_consecutive_clipping is provided use it,
+% otherwise fall back to a safe default of 50 consecutive events.
+if isfield(params, 'max_consecutive_clipping')
+    P.max_consecutive_clipping = params.max_consecutive_clipping;
+else
+    P.max_consecutive_clipping = 50; % default: terminate after 50 consecutive NaN/Inf steps
+end
 
 % FIX (Nov 2, 2025): INCOMPLETE FIX #3 - Add task gate parameterization
 % These control the task-gating mechanism in planning region (motor always learns)
@@ -883,6 +897,14 @@ for i = 1:N-1
     % Delegate predictive coding + update work to the helper (type-stable, JIT-friendly)
     S = hierarchical_step_update(i, S, P);
 
+    % --- NEW: Early termination if too many clipping events occurred ---
+    if isfield(S, 'clipping_count') && S.clipping_count > P.max_clipping_events
+        S.session_end = true;
+        S.termination_step = i;
+        S.termination_reason = sprintf('Excessive consecutive Inf/NaN clipping: %d > %d', S.clipping_count, P.max_clipping_events);
+        fprintf('\n⚠  Early termination at step %d: %s\n', i, S.termination_reason);
+        break;
+    end
     % Update current trial if helper changed it
     current_trial = S.current_trial;
 

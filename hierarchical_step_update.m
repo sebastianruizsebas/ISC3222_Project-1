@@ -359,15 +359,18 @@ else
     consecutive_clipping_count = 0;
 end
 
-% Check if we've hit the termination threshold (50 consecutive Inf/NaN events)
-% INCREASED to 200 on Nov 1, 2025 to enforce minimum trial duration
-% DECREASED back to 50 on Nov 1, 2025 after observing long runs
-MAX_CONSECUTIVE_CLIPPING = 50;
+% Determine consecutive-NaN/Inf termination threshold from P (single-source)
+% Backward compatible fallback: 50 consecutive events
+if isfield(P, 'max_consecutive_clipping') && isfinite(P.max_consecutive_clipping) && P.max_consecutive_clipping > 0
+    MAX_CONSECUTIVE_CLIPPING = P.max_consecutive_clipping;
+else
+    MAX_CONSECUTIVE_CLIPPING = 50;
+end
 if consecutive_clipping_count >= MAX_CONSECUTIVE_CLIPPING
-    fprintf(2, '\n⚠  CRITICAL: %d consecutive Inf/NaN clipping events detected! Terminating trial early.\n', consecutive_clipping_count);
+    fprintf(2, '\n⚠  CRITICAL: %d consecutive Inf/NaN clipping events detected (threshold=%d)! Terminating trial early.\n', consecutive_clipping_count, MAX_CONSECUTIVE_CLIPPING);
     S.session_end = true;
     S.termination_step = i;
-    S.termination_reason = sprintf('Excessive consecutive Inf/NaN clipping (%d events)', consecutive_clipping_count);
+    S.termination_reason = sprintf('Excessive consecutive Inf/NaN clipping (%d events >= %d)', consecutive_clipping_count, MAX_CONSECUTIVE_CLIPPING);
     return;  % Exit the step function early
 end
 
