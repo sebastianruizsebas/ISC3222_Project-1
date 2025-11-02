@@ -25,7 +25,7 @@ fprintf('╚══════════════════════�
 num_particles = 200;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
-num_iterations = 30;  % Each iteration = all particles tested
+num_iterations = 50;  % Each iteration = all particles tested
 
 % Total evaluations will be: num_particles * num_iterations * N_trials (in main script/ 2) = 27000 trials
 total_evals = num_particles * num_iterations * 2;
