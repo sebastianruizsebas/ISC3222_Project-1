@@ -85,8 +85,8 @@ param_bounds.reaching_speed_scale.max = 2.0;
 % WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
 param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
 param_bounds.W_motor_gain.max = 1.0;
-param_bounds.W_plan_gain.min = 0.10;    % Planning weight init gain
-param_bounds.W_plan_gain.max = 0.01;
+param_bounds.W_plan_gain.min = 0.01;    % Planning weight init gain
+param_bounds.W_plan_gain.max = 0.10;
 
 % TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 1, 2025)
 % Interference penalty: encourages task-specific weight specialization

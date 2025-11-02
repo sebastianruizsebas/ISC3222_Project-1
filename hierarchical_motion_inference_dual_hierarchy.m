@@ -53,6 +53,15 @@ else
     optimizer_mode = false;
 end
 
+% Default learning rates and parameters (if not already set by params)
+if ~exist('eta_rep', 'var'), eta_rep = 0.01; end           % Representation learning rate
+if ~exist('eta_W', 'var'), eta_W = 0.001; end              % Weight matrix learning rate
+if ~exist('momentum', 'var'), momentum = 0.9; end           % Momentum for learning
+if ~exist('weight_decay', 'var'), weight_decay = 0.9; end  % Weight decay per step
+
+% Task-conditional learning parameter
+if ~exist('interference_penalty_weight', 'var'), interference_penalty_weight = 0.01; end
+
 % --- Physics parameters (can be provided via params) ---
 if nargin > 0 && isstruct(params)
     if isfield(params, 'gravity'), gravity = params.gravity; end
@@ -351,20 +360,20 @@ P_pi_bounds.L2_plan = [pi_L2_plan_min, pi_L2_plan_max];
 
     if ~(exist('params','var') && isstruct(params) && isfield(params,'save_results') && params.save_results == false)
         fprintf('LEARNING PARAMETERS:\n');
-        fprintf('  η_rep = %.6f (representation learning rate)\n', eta_rep);
-        fprintf('  η_W   = %.6f (weight matrix learning rate)\n', eta_W);
+        fprintf('  eta_rep = %.6f (representation learning rate)\n', eta_rep);
+        fprintf('  eta_W   = %.6f (weight matrix learning rate)\n', eta_W);
         fprintf('  Momentum = %.4f\n', momentum);
         fprintf('  Weight Decay (per-step) = %.4f\n', weight_decay);
         fprintf('  Decay at Phase (Motor) = %.4f (95%%-98%% retained)\n', decay_motor);
         fprintf('  Decay at Phase (Planning) = %.4f (70%%-80%% retained)\n', decay_plan);
-        fprintf('  π_motor   = [%.0f, %.0f, %.0f]\n', pi_L1_motor, pi_L2_motor, pi_L3_motor);
-        fprintf('  π_plan    = [%.0f, %.0f, %.0f]\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
+        fprintf('  pi_motor   = [%.0f, %.0f, %.0f]\n', pi_L1_motor, pi_L2_motor, pi_L3_motor);
+        fprintf('  pi_plan    = [%.0f, %.0f, %.0f]\n', pi_L1_plan, pi_L2_plan, pi_L3_plan);
         fprintf('\n  ADAPTIVE PRECISION (Error-Driven):\n');
         fprintf('    alpha_precision_gain = %.4f (sensitivity to error magnitude)\n', alpha_precision_gain);
-        fprintf('    π_L1_motor bounds: [%.1f, %.1f]\n', pi_L1_motor_min, pi_L1_motor_max);
-        fprintf('    π_L2_motor bounds: [%.1f, %.1f]\n', pi_L2_motor_min, pi_L2_motor_max);
-        fprintf('    π_L1_plan bounds:  [%.1f, %.1f]\n', pi_L1_plan_min, pi_L1_plan_max);
-        fprintf('    π_L2_plan bounds:  [%.1f, %.1f]\n\n', pi_L2_plan_min, pi_L2_plan_max);
+        fprintf('    pi_L1_motor bounds: [%.1f, %.1f]\n', pi_L1_motor_min, pi_L1_motor_max);
+        fprintf('    pi_L2_motor bounds: [%.1f, %.1f]\n', pi_L2_motor_min, pi_L2_motor_max);
+        fprintf('    pi_L1_plan bounds:  [%.1f, %.1f]\n', pi_L1_plan_min, pi_L1_plan_max);
+        fprintf('    pi_L2_plan bounds:  [%.1f, %.1f]\n\n', pi_L2_plan_min, pi_L2_plan_max);
     end
 
 % ====================================================================
@@ -647,9 +656,15 @@ S.denom_trace_L1_motor = denom_trace_L1_motor; S.denom_trace_L2_motor = denom_tr
 S.denom_trace_L1_plan = denom_trace_L1_plan; S.denom_trace_L2_plan = denom_trace_L2_plan;
 
 % Dynamic precision state
-S.pi_L1_motor = pi_L1_motor; S.pi_L2_motor = pi_L2_motor; S.pi_L1_plan = pi_L1_plan; S.pi_L2_plan = pi_L2_plan;
-S.pi_L1_motor_base = pi_L1_motor_base; S.pi_L2_motor_base = pi_L2_motor_base;
-S.pi_L1_plan_base = pi_L1_plan_base; S.pi_L2_plan_base = pi_L2_plan_base;
+% IMPORTANT: Clip initial precision values to be within bounds before simulation starts
+S.pi_L1_motor = max(P_pi_bounds.L1_motor(1), min(P_pi_bounds.L1_motor(2), pi_L1_motor));
+S.pi_L2_motor = max(P_pi_bounds.L2_motor(1), min(P_pi_bounds.L2_motor(2), pi_L2_motor));
+S.pi_L1_plan = max(P_pi_bounds.L1_plan(1), min(P_pi_bounds.L1_plan(2), pi_L1_plan));
+S.pi_L2_plan = max(P_pi_bounds.L2_plan(1), min(P_pi_bounds.L2_plan(2), pi_L2_plan));
+S.pi_L1_motor_base = S.pi_L1_motor;
+S.pi_L2_motor_base = S.pi_L2_motor;
+S.pi_L1_plan_base = S.pi_L1_plan;
+S.pi_L2_plan_base = S.pi_L2_plan;
 % L3 precisions (fixed small values)
 S.pi_L3_motor = pi_L3_motor; S.pi_L3_plan = pi_L3_plan;
 S.pi_L3_motor_base = pi_L3_motor; S.pi_L3_plan_base = pi_L3_plan;
@@ -682,6 +697,22 @@ P.alpha_precision_gain = alpha_precision_gain;
 P.pi_bounds = P_pi_bounds;  % Bounds for dynamic precision updates
 % FIX (Nov 2, 2025): Add missing interference_penalty_weight parameter
 P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight
+
+% VALIDATION: Ensure precision bounds are sensible (min < max)
+if ~isfinite(P.alpha_precision_gain) || P.alpha_precision_gain <= 0
+    P.alpha_precision_gain = 0.5;  % Reset to default if invalid
+end
+
+% Check if bounds are valid - if any min >= max, use defaults
+if P.pi_bounds.L1_motor(1) >= P.pi_bounds.L1_motor(2) || P.pi_bounds.L2_motor(1) >= P.pi_bounds.L2_motor(2) || ...
+   P.pi_bounds.L1_plan(1) >= P.pi_bounds.L1_plan(2) || P.pi_bounds.L2_plan(1) >= P.pi_bounds.L2_plan(2)
+    % BOUNDS INVALID - reset to defaults
+    P.pi_bounds.L1_motor = [10, 500];
+    P.pi_bounds.L2_motor = [0.5, 50];
+    P.pi_bounds.L1_plan = [10, 500];
+    P.pi_bounds.L2_plan = [0.5, 50];
+end
+
 % Termination distance: when player is within this distance of ball the session ends
 P.termination_distance = 0.15;
 if nargin > 0 && isstruct(params) && isfield(params, 'termination_distance')
