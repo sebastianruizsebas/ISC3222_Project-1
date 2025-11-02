@@ -79,6 +79,8 @@ param_bounds.motor_gain.min = 0.1;      % Initial motor command strength
 param_bounds.motor_gain.max = 1.0;
 param_bounds.damping.min = 0.30;        % Velocity dampening
 param_bounds.damping.max = 0.759;
+param_bounds.reaching_speed_scale.min = 0.1;  % Target reaching speed scaling
+param_bounds.reaching_speed_scale.max = 2.0;
 
 % WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
 param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
@@ -158,10 +160,6 @@ fprintf('  reaching_speed_scale: [%.2f, %.2f]\n', ...
     param_bounds.reaching_speed_scale.min, param_bounds.reaching_speed_scale.max);
 
 fprintf('WEIGHT INITIALIZATION GAINS (convergence speed):\n');
-fprintf('  W_motor_gain: [%.3f, %.2f]\n', ...
-    param_bounds.W_motor_gain.min, param_bounds.W_motor_gain.max);
-fprintf('  W_plan_gain:  [%.3f, %.2f]\n', ...
-    param_bounds.W_plan_gain.min, param_bounds.W_plan_gain.max);
 
 fprintf('TASK-CONDITIONAL LEARNING - INTERFERENCE PENALTY (Nov 1, 2025):\n');
 fprintf('  interference_penalty_weight: [%.4f, %.4f]\n\n', ...
