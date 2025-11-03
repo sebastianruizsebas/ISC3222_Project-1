@@ -97,7 +97,7 @@ end
 
 % Timing defaults (can be overridden by params)
 dt = 0.01;              % Time step (s)
-T_per_trial = 15;      % Duration per trial (s) - smaller default for quicker runs
+T_per_trial = 20;      % Duration per trial (s) - smaller default for quicker runs
 n_trials = 2;           % Number of different ball trajectories
 
 if nargin > 0 && isstruct(params)
@@ -336,8 +336,8 @@ else
     % Hard-coded minimums
     pi_L1_motor_min = 10;    pi_L1_motor_max = 500;
     pi_L2_motor_min = 1;     pi_L2_motor_max = 100;
-    pi_L1_plan_min = 10;     pi_L1_plan_max = 500;
-    pi_L2_plan_min = 1;      pi_L2_plan_max = 100;
+    pi_L1_plan_min = 10;     pi_L1_plan_max = 400;
+    pi_L2_plan_min = 1;      pi_L2_plan_max = 60;
 end
 
 % Store bounds in P struct for hierarchical_step_update helper

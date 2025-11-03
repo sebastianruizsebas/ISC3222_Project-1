@@ -22,7 +22,7 @@ fprintf('╚══════════════════════�
 % ====================================================================
 
 % Number of particles (swarm size)
-num_particles = 200;  % Each particle = one parameter set
+num_particles = 250;  % Each particle = one parameter set
 
 % Number of PSO iterations (generations)
 num_iterations = 50;  % Each iteration = all particles tested
@@ -112,7 +112,7 @@ param_bounds.pi_L1_plan_max.max = 320;
 
 % Precision bounds for L2 plan (planning policies)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L2_plan_max.min = 10;
+param_bounds.pi_L2_plan_max.min = 7;
 param_bounds.pi_L2_plan_max.max = 60;
 
 % Objective function weights
