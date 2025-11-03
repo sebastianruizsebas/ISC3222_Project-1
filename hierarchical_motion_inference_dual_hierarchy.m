@@ -97,8 +97,8 @@ end
 
 % Timing defaults (can be overridden by params)
 dt = 0.01;              % Time step (s)
-T_per_trial = 20;      % Duration per trial (s) - smaller default for quicker runs
-n_trials = 2;           % Number of different ball trajectories
+T_per_trial = 30;      % Duration per trial (s) - smaller default for quicker runs
+n_trials = 3;           % Number of different ball trajectories
 
 if nargin > 0 && isstruct(params)
     if isfield(params, 'dt'), dt = params.dt; end
@@ -121,9 +121,9 @@ end
 
 % Workspace bounds (used for generating player starts and ball trajectories)
 workspace_bounds = [
-    -10, 10;      % X bounds
-    -10, 10;      % Y bounds
-    0, 5;        % Z bounds
+    -5, 5;      % X bounds
+    -5, 5;      % Y bounds
+    0, 3.5;        % Z bounds
 ];
 
 % Initial player positions for each trial
@@ -147,76 +147,100 @@ end
 % Enforce player starts on ground plane (z = 0) regardless of any overrides
 initial_positions(:,3) = 0;
 
-% FIXED DETERMINISTIC BALL TRAJECTORIES
-% Each trial has a predefined, identical trajectory (no randomization)
-% This ensures perfect reproducibility across all runs
-ball_trajectories = {};
+fprintf('GENERATING MOVING TARGET TRAJECTORIES (CONSTANT VELOCITY - Nov 3, 2025):\n');
 
-fprintf('GENERATING FIXED BALL TRAJECTORIES (DETERMINISTIC):\n');
+% MOVING TARGET REACHING TASK (Nov 3, 2025 - restores predictive coding test)
+% Each trial has a target following constant velocity (learnable, repeatable)
+% Tests whether hierarchies learn to PREDICT temporal dynamics
+% Format: target_trajectories{trial} = struct with start_pos, velocity, acceleration
+% RATIONALE: Motor learns velocity control; Planning learns target motion model
+%            Error signals decompose naturally: motor vs planning errors
 
-% Define four distinct but fixed ball trajectories
-% Format: struct with 'start_pos', 'velocity', 'acceleration' (row vectors)
+% Define three distinct moving target trajectories (one per trial)
+target_trajectories = {};
 
-% Trial 1: Ball moving diagonally upward then forward
-ball_trajectories{1} = struct(...
-    'start_pos', [2.0, 2.0, 1.0], ...
-    'velocity', [2.5, 1.5, 1.0], ...
-    'acceleration', [0.1, 0.0, 0.0]);
+% Trial 1: Constant velocity toward origin (slow approach)
+% Velocity: [-1.5, -1.5, 0] m/s = 2.12 m/s diagonal approach
+% Starting distance ~7 m → closes in ~3.3 seconds
+target_trajectories{1} = struct(...
+    'start_pos', [5.0, 5.0, 1.5], ...
+    'velocity', [-1.5, -1.5, 0.0], ...
+    'acceleration', [0.0, 0.0, 0.0]);
 
-% Trial 2: Ball moving primarily in X direction with some vertical component
-ball_trajectories{2} = struct(...
-    'start_pos', [2.0, 2.0, 1.0], ...
-    'velocity', [3.0, 0.5, 0.5], ...
-    'acceleration', [0.0, 0.05, -0.1]);
+% Trial 2: Diagonal approach with Z component (medium speed)
+% Velocity: [1.0, -1.5, -0.2] m/s = 1.81 m/s 3D motion
+% Tests Z-axis prediction (downward motion)
+target_trajectories{2} = struct(...
+    'start_pos', [-5.0, 5.0, 2.5], ...
+    'velocity', [1.0, -1.5, -0.2], ...
+    'acceleration', [0.0, 0.0, 0.0]);
 
-% Trial 3: Ball moving in Y direction with upward arc
-ball_trajectories{3} = struct(...
-    'start_pos', [2.0, 2.0, 1.0], ...
-    'velocity', [0.5, 2.0, 2.0], ...
-    'acceleration', [0.0, 0.1, -0.05]);
+% Trial 3: Slower approach (tests generalization)
+% Velocity: [-0.8, 0.5, 0.1] m/s = 0.94 m/s (half Trial 1 speed)
+% Tests whether motor generalizes or memorizes velocity
+target_trajectories{3} = struct(...
+    'start_pos', [5.0, -5.0, 1.0], ...
+    'velocity', [-0.8, 0.5, 0.1], ...
+    'acceleration', [0.0, 0.0, 0.0]);
 
-% Trial 4: Ball moving in mixed 3D trajectory
-ball_trajectories{4} = struct(...
-    'start_pos', [2.0, 2.0, 1.0], ...
-    'velocity', [2.0, 2.0, 1.0], ...
-    'acceleration', [0.05, -0.05, 0.0]);
-
-fprintf('✓ Fixed ball trajectories defined for all trials (DETERMINISTIC):\n');
-for trial = 1:min(n_trials, numel(ball_trajectories))
-    fprintf('  Trial %d: start=[%.1f, %.1f, %.1f], v=[%.1f, %.1f, %.1f], a=[%.3f, %.3f, %.3f]\n', ...
-        trial, ...
-        ball_trajectories{trial}.start_pos(1), ball_trajectories{trial}.start_pos(2), ball_trajectories{trial}.start_pos(3), ...
-        ball_trajectories{trial}.velocity(1), ball_trajectories{trial}.velocity(2), ball_trajectories{trial}.velocity(3), ...
-        ball_trajectories{trial}.acceleration(1), ball_trajectories{trial}.acceleration(2), ball_trajectories{trial}.acceleration(3));
+fprintf('✓ MOVING TARGET TRAJECTORIES DEFINED (CONSTANT VELOCITY):\n');
+fprintf('  Each trial: target follows constant velocity throughout\n');
+for trial = 1:min(n_trials, numel(target_trajectories))
+    tv = target_trajectories{trial};
+    speed = norm(tv.velocity);
+    fprintf('  Trial %d: start=[%.1f,%.1f,%.1f], vel=[%.2f,%.2f,%.2f] (speed=%.2f m/s)\n', ...
+        trial, tv.start_pos(1), tv.start_pos(2), tv.start_pos(3), ...
+        tv.velocity(1), tv.velocity(2), tv.velocity(3), speed);
 end
 fprintf('\n');
 
-% Ensure ball starts are sufficiently far from player initial positions
-% Default minimum separation (meters)
-min_start_sep = 0.5;
-if nargin > 0 && isstruct(params) && isfield(params, 'min_start_sep')
-    min_start_sep = params.min_start_sep;
-end
+% Validation: ensure starting positions allow interception opportunity
+% ENFORCE: minimum and maximum separation for taskability
+min_start_sep = 1.0;   % meters (minimum separation - allows learning)
+max_start_sep = 3.0;   % meters (maximum separation - ensures catchability within trial duration)
+
+fprintf('VALIDATING AND ENFORCING INTERCEPTION GEOMETRY:\n');
+fprintf('  Target constraints: %.1f m ≤ sep ≤ %.1f m (ensures catchability)\n\n', min_start_sep, max_start_sep);
 
 for trial = 1:n_trials
     player_pos = initial_positions(trial, :);
-    start_pos = ball_trajectories{trial}.start_pos;
-    sep = norm(start_pos - player_pos);
-    attempts = 0;
-    while sep < min_start_sep && attempts < 100
-        start_pos = [workspace_bounds(1,1) + rand()*(workspace_bounds(1,2)-workspace_bounds(1,1)), ...
-                     workspace_bounds(2,1) + rand()*(workspace_bounds(2,2)-workspace_bounds(2,1)), ...
-                     workspace_bounds(3,1) + rand()*(workspace_bounds(3,2)-workspace_bounds(3,1))];
-        ball_trajectories{trial}.start_pos = start_pos;
-        sep = norm(start_pos - player_pos);
-        attempts = attempts + 1;
-    end
+    target_start = target_trajectories{trial}.start_pos;
+    target_vel = target_trajectories{trial}.velocity;
+    speed = norm(target_vel);
+    
+    sep = norm(target_start - player_pos);
+    
+    % Enforce minimum separation (move target away if too close)
     if sep < min_start_sep
-        % fallback: place ball on the boundary of required separation
-        dir = randn(1,3); dir = dir / (norm(dir)+1e-9);
-        ball_trajectories{trial}.start_pos = player_pos + dir * min_start_sep;
+        direction = (target_start - player_pos) / (sep + 1e-6);
+        target_trajectories{trial}.start_pos = player_pos + direction * min_start_sep;
+        fprintf('  Trial %d: ⚠ ADJUSTED (was %.2f m, TOO CLOSE) → now %.2f m\n', ...
+            trial, sep, min_start_sep);
+        sep = min_start_sep;
+    % Enforce maximum separation (move target closer if too far)
+    elseif sep > max_start_sep
+        direction = (target_start - player_pos) / (sep + 1e-6);
+        target_trajectories{trial}.start_pos = player_pos + direction * max_start_sep;
+        fprintf('  Trial %d: ⚠ ADJUSTED (was %.2f m, TOO FAR) → now %.2f m\n', ...
+            trial, sep, max_start_sep);
+        sep = max_start_sep;
+    else
+        fprintf('  Trial %d: ✓ OK (sep=%.2f m)\n', trial, sep);
+    end
+    
+    % Estimate time to interception (assuming player chases along closest approach)
+    if speed > 0.01  % Non-zero velocity
+        time_to_close = sep / speed;  % Rough estimate
+        if time_to_close <= T_per_trial
+            fprintf('      Target speed=%.2f m/s → est. closure in %.1f s (trial duration=%.1f s ✓)\n', ...
+                speed, time_to_close, T_per_trial);
+        else
+            fprintf('      ⚠ WARNING: Target speed=%.2f m/s → est. closure in %.1f s (exceeds trial duration=%.1f s!)\n', ...
+                speed, time_to_close, T_per_trial);
+        end
     end
 end
+fprintf('\n');
 
 % Layer dimensions (needed later when initializing representations)
 % NOTE: scale_factor controls how much to enlarge internal layers.
@@ -398,15 +422,17 @@ tmp_vel_init = zeros(1, numel(idx_vel)); tmp_vel_init(1:min(3,numel(tmp_vel_init
 R_L1_motor(1, idx_vel) = tmp_vel_init;
 R_L1_motor(1, idx_bias) = 1;
 
-% Ball initial state
-x_ball(1) = ball_trajectories{1}.start_pos(1);
-y_ball(1) = ball_trajectories{1}.start_pos(2);
-z_ball(1) = ball_trajectories{1}.start_pos(3);
-vx_ball(1) = ball_trajectories{1}.velocity(1);
-vy_ball(1) = ball_trajectories{1}.velocity(2);
-vz_ball(1) = ball_trajectories{1}.velocity(3);
+% MOVING TARGET INITIAL STATE (Nov 3, 2025 - constant velocity kinematics)
+% Target starts at specified position with specified velocity
+% This tests predictive coding: can hierarchies learn target motion model?
+x_ball(1) = target_trajectories{1}.start_pos(1);
+y_ball(1) = target_trajectories{1}.start_pos(2);
+z_ball(1) = target_trajectories{1}.start_pos(3);
+vx_ball(1) = target_trajectories{1}.velocity(1);  % Target has non-zero velocity (MOVING)
+vy_ball(1) = target_trajectories{1}.velocity(2);
+vz_ball(1) = target_trajectories{1}.velocity(3);
 
-% Motor L2/L3: initial velocity commands
+% Motor L2/L3: initial velocity commands toward target
 reach_direction = ([x_ball(1), y_ball(1), z_ball(1)] - [x_player(1), y_player(1), z_player(1)]) / ...
                    (norm([x_ball(1), y_ball(1), z_ball(1)] - [x_player(1), y_player(1), z_player(1)]) + 1e-6);
 target_distance = norm([x_ball(1), y_ball(1), z_ball(1)] - [x_player(1), y_player(1), z_player(1)]);
@@ -416,28 +442,28 @@ R_L2_motor(1, 1:3) = reach_direction * reaching_speed;
 R_L2_motor(1, 4:6) = 0.01 * randn(1, 3);
 R_L3_motor(1, 1:3) = reach_direction * reaching_speed;
 
-% Planning L1: ball position + goal (use semantic idx)
-R_L1_plan(1, idx_pos) = [x_ball(1), y_ball(1), z_ball(1)];  % Ball position
-% planning velocity/goal channels (use ball pos as initial goal for available vel slots)
-tmp_goal = zeros(1, numel(idx_vel));
-vals = [x_ball(1), y_ball(1), z_ball(1)];
-ncopy = min(3, numel(tmp_goal));
-tmp_goal(1:ncopy) = vals(1:ncopy);
-R_L1_plan(1, idx_vel) = tmp_goal;
+% Planning L1: target POSITION and VELOCITY (use semantic idx)
+% CHANGED (Nov 3): Now include velocity information for predictive planning
+R_L1_plan(1, idx_pos) = [x_ball(1), y_ball(1), z_ball(1)];  % Target position
+R_L1_plan(1, idx_vel) = [vx_ball(1), vy_ball(1), vz_ball(1)];  % Target velocity (for prediction)
 R_L1_plan(1, idx_bias) = 1;
 
-% Planning L2/L3: initial policies
-R_L2_plan(1, 1:3) = reach_direction * reaching_speed;
+% Planning L2/L3: initial policies based on target velocity
+% (Planning will learn to predict future positions based on velocity)
+target_vel = [vx_ball(1), vy_ball(1), vz_ball(1)];
+R_L2_plan(1, 1:3) = target_vel / (norm(target_vel) + 1e-6);  % Normalized velocity direction
 R_L2_plan(1, 4:6) = 0.01 * randn(1, 3);
-R_L3_plan(1, 1:3) = reach_direction * reaching_speed;
+R_L3_plan(1, 1:3) = target_vel / (norm(target_vel) + 1e-6);
 
-fprintf('INITIAL CONDITIONS (Trial 1):\n');
+fprintf('INITIAL CONDITIONS (Trial 1 - MOVING TARGET):\n');
 fprintf('  Player start: [%.2f, %.2f, %.2f]\n', x_player(1), y_player(1), z_player(1));
-fprintf('  Ball start:   [%.2f, %.2f, %.2f]\n', x_ball(1), y_ball(1), z_ball(1));
-fprintf('  Initial reach direction: [%.4f, %.4f, %.4f], speed: %.4f m/s\n', ...
-    reach_direction(1), reach_direction(2), reach_direction(3), reaching_speed);
+fprintf('  Target start: [%.2f, %.2f, %.2f]\n', x_ball(1), y_ball(1), z_ball(1));
+fprintf('  Target velocity: [%.2f, %.2f, %.2f] (MOVING - tests prediction)\n', vx_ball(1), vy_ball(1), vz_ball(1));
+fprintf('  Initial reach direction: [%.4f, %.4f, %.4f]\n', ...
+    reach_direction(1), reach_direction(2), reach_direction(3));
 fprintf('  R_L1_motor (proprioception) initialized\n');
-fprintf('  R_L1_plan (ball + goal) initialized\n\n');
+fprintf('  R_L1_plan (target position + velocity) initialized\n');
+fprintf('  Expected: Motor learns velocity control; Planning learns target motion model\n\n');
 
 % ====================================================================
 % INITIALIZE WEIGHT MATRICES - DUAL HIERARCHY (TASK-INDEXED)
@@ -446,18 +472,14 @@ fprintf('  R_L1_plan (ball + goal) initialized\n\n');
 % Each task gets its own learned mappings, reducing catastrophic forgetting.
 
 % Motor region weights: task-indexed (one copy per trial)
+% PURE FEEDFORWARD STRUCTURE (lateral weights removed Nov 2, 2025)
 W_motor_L2_to_L1 = cell(n_trials, 1);  % task-specific motor basis->proprioception
 W_motor_L3_to_L2 = cell(n_trials, 1);  % task-specific output->motor basis
-W_motor_L1_lat = cell(n_trials, 1);    % task-specific lateral motor L1
-W_motor_L2_lat = cell(n_trials, 1);    % task-specific lateral motor L2
-W_motor_L3_lat = cell(n_trials, 1);    % task-specific lateral motor L3
 
 % Planning region weights: task-indexed
+% PURE FEEDFORWARD STRUCTURE (lateral weights removed Nov 2, 2025)
 W_plan_L2_to_L1 = cell(n_trials, 1);   % task-specific policy->goal
 W_plan_L3_to_L2 = cell(n_trials, 1);   % task-specific output->policy
-W_plan_L1_lat = cell(n_trials, 1);     % task-specific lateral planning L1
-W_plan_L2_lat = cell(n_trials, 1);     % task-specific lateral planning L2
-W_plan_L3_lat = cell(n_trials, 1);     % task-specific lateral planning L3
 
 % Initialize per-task weight matrices
 for task_idx = 1:n_trials
@@ -487,17 +509,6 @@ for task_idx = 1:n_trials
         W_motor_L3_to_L2{task_idx}(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
     end
     
-    % --- Motor lateral weights ---
-    rng(task_idx);  % reproducible per-task lateral init
-    W_motor_L1_lat{task_idx} = 0.01 * randn(n_L1_motor, n_L1_motor);
-    W_motor_L2_lat{task_idx} = 0.01 * randn(n_L2_motor, n_L2_motor);
-    W_motor_L3_lat{task_idx} = 0.01 * randn(n_L3_motor, n_L3_motor);
-    
-    % Remove strong self-connections
-    W_motor_L1_lat{task_idx}(1:size(W_motor_L1_lat{task_idx},1)+1:end) = 0;
-    W_motor_L2_lat{task_idx}(1:size(W_motor_L2_lat{task_idx},1)+1:end) = 0;
-    W_motor_L3_lat{task_idx}(1:size(W_motor_L3_lat{task_idx},1)+1:end) = 0;
-    
     % --- Planning L2->L1 mappings (policy to goal) ---
     W_plan_L2_to_L1{task_idx} = zeros(n_L1_plan, n_L2_plan);
     
@@ -516,17 +527,6 @@ for task_idx = 1:n_trials
     if n_L2_plan > map_block_p
         W_plan_L3_to_L2{task_idx}(map_block_p+1:end, 1:n_L3_plan) = (W_plan_gain / sqrt(fan_in3_p)) * 0.01 * randn(n_L2_plan-map_block_p, n_L3_plan);
     end
-    
-    % --- Planning lateral weights ---
-    rng(task_idx + n_trials);  % different seed for planning
-    W_plan_L1_lat{task_idx} = 0.01 * randn(n_L1_plan, n_L1_plan);
-    W_plan_L2_lat{task_idx} = 0.01 * randn(n_L2_plan, n_L2_plan);
-    W_plan_L3_lat{task_idx} = 0.01 * randn(n_L3_plan, n_L3_plan);
-    
-    % Remove strong self-connections
-    W_plan_L1_lat{task_idx}(1:size(W_plan_L1_lat{task_idx},1)+1:end) = 0;
-    W_plan_L2_lat{task_idx}(1:size(W_plan_L2_lat{task_idx},1)+1:end) = 0;
-    W_plan_L3_lat{task_idx}(1:size(W_plan_L3_lat{task_idx},1)+1:end) = 0;
 end
 
 
@@ -622,11 +622,9 @@ S.pred_L1_plan = pred_L1_plan; S.pred_L2_plan = pred_L2_plan;
 S.E_L1_motor = E_L1_motor; S.E_L2_motor = E_L2_motor;
 S.E_L1_plan = E_L1_plan; S.E_L2_plan = E_L2_plan;
 
-% Weight matrices (task-indexed cells)
+% Weight matrices (task-indexed cells - feedforward only, no lateral)
 S.W_motor_L2_to_L1 = W_motor_L2_to_L1; S.W_motor_L3_to_L2 = W_motor_L3_to_L2;
 S.W_plan_L2_to_L1 = W_plan_L2_to_L1; S.W_plan_L3_to_L2 = W_plan_L3_to_L2;
-S.W_motor_L1_lat = W_motor_L1_lat; S.W_motor_L2_lat = W_motor_L2_lat; S.W_motor_L3_lat = W_motor_L3_lat;
-S.W_plan_L1_lat = W_plan_L1_lat; S.W_plan_L2_lat = W_plan_L2_lat; S.W_plan_L3_lat = W_plan_L3_lat;
 
 % Learning traces
 S.free_energy_all = free_energy_all; S.interception_error_all = interception_error_all;
@@ -686,7 +684,7 @@ S.clipping_count = 0;  % Counter incremented each time clipping is triggered
 % Misc
 S.current_trial = current_trial;
 S.phases_indices = phases_indices;
-S.ball_trajectories = ball_trajectories;
+S.target_trajectories = target_trajectories;  % Moving target trajectories (constant velocity)
 
 %---------------------------------------------------------------------
 % Parameter struct (constants passed to step helper)
@@ -702,7 +700,9 @@ P.idx_pos = idx_pos; P.idx_vel = idx_vel; P.idx_bias = idx_bias;
 % Pass adaptive precision parameters to helper
 P.alpha_precision_gain = alpha_precision_gain;
 P.pi_bounds = P_pi_bounds;  % Bounds for dynamic precision updates
-P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight;
+P.interference_penalty_weight = interference_penalty_weight;  % Cross-task error penalty weight
+% Pass moving target trajectories to helper
+P.target_trajectories = target_trajectories;  % For kinematic integration in step helper
 % Add max clipping events threshold (stop early if too many clipping events)
 if isfield(params, 'max_clipping_events')
     P.max_clipping_events = params.max_clipping_events;
@@ -799,13 +799,13 @@ for i = 1:N-1
                 S.vy_player(i) = 0;
                 S.vz_player(i) = 0;
 
-                % Reset ball for new trial (write into S)
-                S.x_ball(i) = ball_trajectories{trial}.start_pos(1);
-                S.y_ball(i) = ball_trajectories{trial}.start_pos(2);
-                S.z_ball(i) = ball_trajectories{trial}.start_pos(3);
-                S.vx_ball(i) = ball_trajectories{trial}.velocity(1);
-                S.vy_ball(i) = ball_trajectories{trial}.velocity(2);
-                S.vz_ball(i) = ball_trajectories{trial}.velocity(3);
+                % MOVING TARGET RESET (Nov 3, 2025 - constant velocity, tests predictive coding)
+                S.x_ball(i) = target_trajectories{trial}.start_pos(1);
+                S.y_ball(i) = target_trajectories{trial}.start_pos(2);
+                S.z_ball(i) = target_trajectories{trial}.start_pos(3);
+                S.vx_ball(i) = target_trajectories{trial}.velocity(1);  % Target has velocity (MOVING - tests prediction)
+                S.vy_ball(i) = target_trajectories{trial}.velocity(2);
+                S.vz_ball(i) = target_trajectories{trial}.velocity(3);
                 
                 % Update task context (L0) in S
                 S.R_L0(i, :) = 0;
@@ -827,15 +827,16 @@ for i = 1:N-1
                 S.R_L3_motor(i, 1:3) = reach_direction * reaching_speed;
                 
                 % Reset planning region (write into S)
-                S.R_L1_plan(i, idx_pos) = [S.x_ball(i), S.y_ball(i), S.z_ball(i)];
-                tmpg = zeros(1, numel(idx_vel)); vals = [S.x_ball(i), S.y_ball(i), S.z_ball(i)];
-                ncopy = min(3, numel(tmpg)); tmpg(1:ncopy) = vals(1:ncopy);
-                S.R_L1_plan(i, idx_vel) = tmpg;
+                % CHANGED (Nov 3): Include target velocity in planning L1 for predictive modeling
+                S.R_L1_plan(i, idx_pos) = [S.x_ball(i), S.y_ball(i), S.z_ball(i)];  % Target position
+                S.R_L1_plan(i, idx_vel) = [S.vx_ball(i), S.vy_ball(i), S.vz_ball(i)];  % Target velocity (for prediction)
                 S.R_L1_plan(i, idx_bias) = 1;
 
-                S.R_L2_plan(i, 1:3) = reach_direction * reaching_speed;
+                % Planning L2/L3: initialize based on target velocity
+                target_vel = [S.vx_ball(i), S.vy_ball(i), S.vz_ball(i)];
+                S.R_L2_plan(i, 1:3) = target_vel / (norm(target_vel) + 1e-6);  % Normalized velocity direction
                 S.R_L2_plan(i, 4:6) = 0.01 * randn(1, 3);
-                S.R_L3_plan(i, 1:3) = reach_direction * reaching_speed;
+                S.R_L3_plan(i, 1:3) = target_vel / (norm(target_vel) + 1e-6);
                 
                 % Apply phase transition decay - differential for motor vs. planning
                 % Weight matrices are stored as cell arrays (one per task). Apply
@@ -953,9 +954,9 @@ free_energy_all = S.free_energy_all;
 % Ensure all critical output arrays are finite before returning to caller
 % This prevents NaN/Inf from propagating through optimization / plotting stages
 
-max_finite_value = 1e8;
+max_finite_value = 1e12;
 min_valid_free_energy = 0;
-max_valid_free_energy = 1e7;
+max_valid_free_energy = 1e12;
 
 % Clip free energy to safe range
 free_energy_all = max(min_valid_free_energy, min(max_valid_free_energy, free_energy_all));
@@ -990,10 +991,9 @@ if isfield(S, 'termination_reason') && contains(S.termination_reason, 'Excessive
 end
 
 phases_indices = S.phases_indices;
+target_trajectories = S.target_trajectories;
 W_motor_L2_to_L1 = S.W_motor_L2_to_L1; W_motor_L3_to_L2 = S.W_motor_L3_to_L2;
 W_plan_L2_to_L1 = S.W_plan_L2_to_L1; W_plan_L3_to_L2 = S.W_plan_L3_to_L2;
-W_motor_L1_lat = S.W_motor_L1_lat; W_motor_L2_lat = S.W_motor_L2_lat; W_motor_L3_lat = S.W_motor_L3_lat;
-W_plan_L1_lat = S.W_plan_L1_lat; W_plan_L2_lat = S.W_plan_L2_lat; W_plan_L3_lat = S.W_plan_L3_lat;
 learning_trace_W = S.learning_trace_W;
 pi_trace_L1_motor = S.pi_trace_L1_motor; pi_trace_L2_motor = S.pi_trace_L2_motor;
 pi_trace_L1_plan = S.pi_trace_L1_plan; pi_trace_L2_plan = S.pi_trace_L2_plan;
@@ -1022,10 +1022,9 @@ results.R_L1_plan = R_L1_plan; results.R_L2_plan = R_L2_plan; results.R_L3_plan 
 results.interception_error_all = interception_error_all;
 results.free_energy_all = free_energy_all;
 results.phases_indices = phases_indices;
+results.target_trajectories = target_trajectories;
 results.W_motor_L2_to_L1 = W_motor_L2_to_L1; results.W_motor_L3_to_L2 = W_motor_L3_to_L2;
 results.W_plan_L2_to_L1 = W_plan_L2_to_L1; results.W_plan_L3_to_L2 = W_plan_L3_to_L2;
-results.W_motor_L1_lat = W_motor_L1_lat; results.W_motor_L2_lat = W_motor_L2_lat; results.W_motor_L3_lat = W_motor_L3_lat;
-results.W_plan_L1_lat = W_plan_L1_lat; results.W_plan_L2_lat = W_plan_L2_lat; results.W_plan_L3_lat = W_plan_L3_lat;
 results.learning_trace_W = learning_trace_W;
 results.pi_trace_L1_motor = pi_trace_L1_motor; results.pi_trace_L2_motor = pi_trace_L2_motor;
 results.pi_trace_L1_plan = pi_trace_L1_plan; results.pi_trace_L2_plan = pi_trace_L2_plan;

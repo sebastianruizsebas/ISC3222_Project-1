@@ -17,7 +17,7 @@ script_dir = fileparts(mfilename('fullpath'));
 project_root = fileparts(script_dir);
 
 if nargin < 1 || isempty(pso_file)
-    pso_file = fullfile(project_root, 'tools/figures/pso_top20_best_params.mat');
+    pso_file = fullfile(project_root, 'figures/pso_top200_best_params.mat');
 end
 
 if nargin < 2 || isempty(idx)

@@ -133,4 +133,88 @@ end
 saveas(fig, fullfile(dist_dir, sprintf('pso_top%d_all_param_histograms.png', N)));
 close(fig);
 
-fprintf('All done.\n');
+%% Pairwise plots: parameter value vs score
+% Extract scores (robust to a few possible field names)
+scores = nan(N,1);
+for k = 1:N
+    if isfield(leader_list(k), 'score') && ~isempty(leader_list(k).score)
+        scores(k) = double(leader_list(k).score);
+    elseif isfield(leader_list(k), 'obj') && ~isempty(leader_list(k).obj)
+        scores(k) = double(leader_list(k).obj);
+    elseif isfield(leader_list(k), 'cost') && ~isempty(leader_list(k).cost)
+        scores(k) = double(leader_list(k).cost);
+    elseif isfield(leader_list(k), 'fitness') && ~isempty(leader_list(k).fitness)
+        scores(k) = double(leader_list(k).fitness);
+    else
+        scores(k) = NaN;
+    end
+end
+
+% Per-parameter scatter plots of value vs score
+corr_vals = nan(n_params,1);
+for j = 1:n_params
+    pname = param_names{j};
+    x = vals(:,j);
+    mask = ~isnan(x) & ~isnan(scores);
+    xnon = x(mask);
+    snon = scores(mask);
+
+    fig = figure('Name', sprintf('%s vs score', pname), 'Visible', 'off');
+    scatter(xnon, snon, 20, 'filled'); hold on;
+    xlabel(pname, 'Interpreter', 'none'); ylabel('score'); grid on;
+    title(sprintf('%s vs score (n=%d)', pname, numel(snon)), 'Interpreter', 'none');
+
+    if numel(snon) > 2
+        % Linear fit and overlay
+        pfit = polyfit(xnon, snon, 1);
+        xx = linspace(min(xnon), max(xnon), 200);
+        plot(xx, polyval(pfit, xx), 'r-', 'LineWidth', 1.2);
+        % Pearson correlation
+        R = corrcoef(xnon, snon);
+        corr_vals(j) = R(1,2);
+        text(0.05, 0.95, sprintf('r=%.3g', corr_vals(j)), 'Units','normalized', 'VerticalAlignment','top');
+    end
+
+    fig_fname = fullfile(dist_dir, sprintf('%s_vs_score.png', pname));
+    try
+        saveas(fig, fig_fname);
+    catch ME
+        warning('Failed to save score-plot for %s: %s', pname, ME.message);
+    end
+    close(fig);
+end
+
+% Combined multipanel scatter figure
+cols = 5; rows = ceil(n_params/cols);
+fig = figure('Name', sprintf('Top-%d param vs score', N), 'Visible', 'off', 'Position', [100 100 min(1600,320*cols) min(900,200*rows)]);
+for j = 1:n_params
+    subplot(rows, cols, j);
+    x = vals(:,j);
+    mask = ~isnan(x) & ~isnan(scores);
+    if sum(mask) < 2
+        text(0.5,0.5,'no data','HorizontalAlignment','center'); axis off; continue;
+    end
+    scatter(x(mask), scores(mask), 10, 'filled');
+    title(param_names{j}, 'Interpreter', 'none');
+    if ~isnan(corr_vals(j))
+        % annotate r
+        text(0.02,0.95, sprintf('r=%.3g', corr_vals(j)), 'Units','normalized', 'VerticalAlignment','top');
+    end
+    xlabel(''); ylabel('');
+end
+saveas(fig, fullfile(dist_dir, sprintf('pso_top%d_all_param_vs_score.png', N)));
+close(fig);
+
+% Print ranked correlations
+[~, idx] = sort(abs(corr_vals), 'descend', 'MissingPlacement','last');
+fprintf('\nTop parameter correlations with score (abs r desc):\n');
+fprintf(' %-28s %8s %8s\n', 'parameter','r','n');
+fprintf('%s\n', repmat('-',1,50));
+for ii = 1:min(20, n_params)
+    j = idx(ii);
+    if isnan(corr_vals(j)), continue; end
+    mask = ~isnan(vals(:,j)) & ~isnan(scores);
+    fprintf(' %-28s %8.4g %8d\n', param_names{j}, corr_vals(j), sum(mask));
+end
+
+fprintf('\nAll done.\n');

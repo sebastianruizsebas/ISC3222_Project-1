@@ -43,83 +43,40 @@ assert(isscalar(idx_bias) && idx_bias > 0 && idx_bias <= 100, 'ERROR: idx_bias i
 
 % For convenience, operate directly on S fields (avoid unused local aliases)
 
-% ------------------------------
-% BALL PHYSICS (unchanged)
-% ------------------------------
-time_in_trial = i - S.phases_indices{S.current_trial}(1);
-acc_x = S.ball_trajectories{S.current_trial}.acceleration(1) * sin(time_in_trial * 0.001);
-acc_y = S.ball_trajectories{S.current_trial}.acceleration(2) * sin(time_in_trial * 0.001 + 1);
-acc_z = S.ball_trajectories{S.current_trial}.acceleration(3) * sin(time_in_trial * 0.001 + 2);
+% --- MOVING TARGET KINEMATICS (NOV 3, 2025 - CONSTANT VELOCITY) ---
+% Target follows constant velocity motion (learnable, repeatable)
+% This tests predictive coding: can hierarchies learn to predict target motion?
+% Motor learns: velocity control (how to chase)
+% Planning learns: target motion model (where target will be)
 
-ax = acc_x; ay = acc_y; az = acc_z - P.gravity;
+% Get current trial index and target trajectory parameters
+if isfield(P, 'target_trajectories') && ~isempty(P.target_trajectories)
+    current_trial_idx = max(1, min(numel(P.target_trajectories), S.current_trial));
+    target_traj = P.target_trajectories{current_trial_idx};
+    
+    % Extract motion parameters from trajectory
+    velocity = target_traj.velocity;
+    acceleration = target_traj.acceleration;
+else
+    % Fallback: constant velocity (no acceleration)
+    velocity = [0, 0, 0];
+    acceleration = [0, 0, 0];
+end
 
-S.vx_ball(i+1) = S.vx_ball(i) + ax * dt;
-S.vy_ball(i+1) = S.vy_ball(i) + ay * dt;
-S.vz_ball(i+1) = S.vz_ball(i) + az * dt;
+% Integrate velocity (acceleration causes velocity change)
+S.vx_ball(i+1) = S.vx_ball(i) + acceleration(1) * dt;
+S.vy_ball(i+1) = S.vy_ball(i) + acceleration(2) * dt;
+S.vz_ball(i+1) = S.vz_ball(i) + acceleration(3) * dt;
 
-S.vx_ball(i+1) = S.vx_ball(i+1) * (1 - P.air_drag);
-S.vy_ball(i+1) = S.vy_ball(i+1) * (1 - P.air_drag);
-S.vz_ball(i+1) = S.vz_ball(i+1) * (1 - P.air_drag);
-
+% Integrate position (velocity causes position change)
 S.x_ball(i+1) = S.x_ball(i) + dt * S.vx_ball(i+1);
 S.y_ball(i+1) = S.y_ball(i) + dt * S.vy_ball(i+1);
 S.z_ball(i+1) = S.z_ball(i) + dt * S.vz_ball(i+1);
 
-% Allow an explicit ground plane override (P.ground_z). Fall back to workspace lower bound.
-if isfield(P, 'ground_z')
-    ground_z = P.ground_z;
-else
-    ground_z = P.workspace_bounds(3,1);
-end
-if S.z_ball(i+1) <= ground_z
-    S.z_ball(i+1) = ground_z;
-    if S.vz_ball(i+1) < 0
-        S.vz_ball(i+1) = -P.restitution * S.vz_ball(i+1);
-    end
-    S.vx_ball(i+1) = S.vx_ball(i+1) * P.ground_friction;
-    S.vy_ball(i+1) = S.vy_ball(i+1) * P.ground_friction;
-    if abs(S.vz_ball(i+1)) < 1e-3
-        S.vz_ball(i+1) = 0;
-    end
-end
-
+% Clamp positions to workspace bounds (safety)
 S.x_ball(i+1) = max(workspace_bounds(1,1), min(workspace_bounds(1,2), S.x_ball(i+1)));
 S.y_ball(i+1) = max(workspace_bounds(2,1), min(workspace_bounds(2,2), S.y_ball(i+1)));
 S.z_ball(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.z_ball(i+1)));
-
-% --- check ball pre-clamp bounds (debug / safety) ---
-% record the raw computed position (before clamp) if you want to inspect later
-raw_x = S.x_ball(i+1);
-raw_y = S.y_ball(i+1);
-raw_z = S.z_ball(i+1);
-
-% initialize log fields on first use (cheap)
-if ~isfield(S, 'ball_out_of_bounds_log')
-    S.ball_out_of_bounds_log = zeros(0,5); % columns: step, raw_x, raw_y, raw_z, reasonCode
-    S.ball_out_of_bounds = false;
-end
-
-% small tolerance to avoid floating point jitter reporting
-tol = 1e-9;
-x_min = workspace_bounds(1,1) - tol; x_max = workspace_bounds(1,2) + tol;
-y_min = workspace_bounds(2,1) - tol; y_max = workspace_bounds(2,2) + tol;
-z_min = workspace_bounds(3,1) - tol; z_max = workspace_bounds(3,2) + tol;
-
-out = (raw_x < x_min) || (raw_x > x_max) || (raw_y < y_min) || (raw_y > y_max) || (raw_z < z_min) || (raw_z > z_max);
-
-if out
-    S.ball_out_of_bounds = true;
-    % reasonCode: 1=x,2=y,3=z, sum if multiple
-    reasonCode = 0;
-    if raw_x < x_min || raw_x > x_max, reasonCode = reasonCode + 1; end
-    if raw_y < y_min || raw_y > y_max, reasonCode = reasonCode + 2; end
-    if raw_z < z_min || raw_z > z_max, reasonCode = reasonCode + 4; end
-    S.ball_out_of_bounds_log(end+1, :) = [i+1, raw_x, raw_y, raw_z, reasonCode];
-    % optional: clamp to bounds (if you keep your existing clamp, this is redundant)
-    S.x_ball(i+1) = min(max(raw_x, workspace_bounds(1,1)), workspace_bounds(1,2));
-    S.y_ball(i+1) = min(max(raw_y, workspace_bounds(2,1)), workspace_bounds(2,2));
-    S.z_ball(i+1) = min(max(raw_z, workspace_bounds(3,1)), workspace_bounds(3,2));
-end
 
 % ------------------------------
 % PREDICTION (Motor & Planning) WITH MULTIPLICATIVE TASK GATING
@@ -133,18 +90,12 @@ if current_task_idx < 1 || current_task_idx > length(S.W_motor_L2_to_L1)
     current_task_idx = 1;  % safety fallback
 end
 
-% Get task-specific weight matrices for current task
+% Get task-specific weight matrices for current task (feedforward only, no lateral)
 W_motor_L2_to_L1_active = S.W_motor_L2_to_L1{current_task_idx};
 W_motor_L3_to_L2_active = S.W_motor_L3_to_L2{current_task_idx};
-W_motor_L1_lat_active = S.W_motor_L1_lat{current_task_idx};
-W_motor_L2_lat_active = S.W_motor_L2_lat{current_task_idx};
-W_motor_L3_lat_active = S.W_motor_L3_lat{current_task_idx};
 
 W_plan_L2_to_L1_active = S.W_plan_L2_to_L1{current_task_idx};
 W_plan_L3_to_L2_active = S.W_plan_L3_to_L2{current_task_idx};
-W_plan_L1_lat_active = S.W_plan_L1_lat{current_task_idx};
-W_plan_L2_lat_active = S.W_plan_L2_lat{current_task_idx};
-W_plan_L3_lat_active = S.W_plan_L3_lat{current_task_idx};
 
 % THEORETICAL FIX #1 (Nov 2, 2025): Remove Multiplicative Task Gating from Predictions
 % BEFORE: Predictions were gated → task_gate_motor * (W matrices @ R layers)
@@ -155,15 +106,15 @@ W_plan_L3_lat_active = S.W_plan_L3_lat{current_task_idx};
 %           Off-task weights remain frozen (can't learn), so off-task predictions are stale (expected)
 %           No additional gating needed
 
-% Motor region predictions (NO multiplicative gating - pure predictions)
-S.pred_L2_motor(i,:) = S.R_L3_motor(i,:) * W_motor_L3_to_L2_active' + S.R_L2_motor(i,:) * W_motor_L2_lat_active';
+% Motor region predictions (NO multiplicative gating - pure feedforward, no lateral)
+S.pred_L2_motor(i,:) = S.R_L3_motor(i,:) * W_motor_L3_to_L2_active';
 
-S.pred_L1_motor(i,:) = S.R_L2_motor(i,:) * W_motor_L2_to_L1_active' + S.R_L1_motor(i,:) * W_motor_L1_lat_active';
+S.pred_L1_motor(i,:) = S.R_L2_motor(i,:) * W_motor_L2_to_L1_active';
 
-% Planning region predictions (NO multiplicative gating - pure predictions)
-S.pred_L2_plan(i,:) = S.R_L3_plan(i,:) * W_plan_L3_to_L2_active' + S.R_L2_plan(i,:) * W_plan_L2_lat_active';
+% Planning region predictions (NO multiplicative gating - pure feedforward, no lateral)
+S.pred_L2_plan(i,:) = S.R_L3_plan(i,:) * W_plan_L3_to_L2_active';
 
-S.pred_L1_plan(i,:) = S.R_L2_plan(i,:) * W_plan_L2_to_L1_active' + S.R_L1_plan(i,:) * W_plan_L1_lat_active';
+S.pred_L1_plan(i,:) = S.R_L2_plan(i,:) * W_plan_L2_to_L1_active';
 
 % --- MOTOR VELOCITY COMMAND EXTRACTION (CORRECTED) ---
 % Extract velocity predictions using semantic indices
@@ -277,9 +228,9 @@ end
 n_pos_channels = numel(idx_pos);
 
 % STRONG CLIPPING: Ensure precision values are always safe and finite (prevents Inf/NaN)
-max_finite_value = 1e8;
-min_precision = 0.01;
-max_precision = 1e6;
+max_finite_value = 1e12;
+min_precision = 1e-12;
+max_precision = 1e12;
 
 % Clip precision values to safe ranges
 pi_L1_motor_safe = max(min_precision, min(max_precision, S.pi_L1_motor));
@@ -624,22 +575,6 @@ for task_idx = 1:numel(S.W_motor_L2_to_L1)
     end
 end
 
-% lateral motor updates (ALL TASKS)
-dW_motor_L1_lat = -(P.eta_W * S.pi_L1_motor / max(0.1, mean(abs(S.R_L1_motor(i,:))))) * (S.E_L1_motor(i,:)' * S.R_L1_motor(i,:));
-dW_motor_L2_lat = -(P.eta_W * S.pi_L2_motor / max(0.1, mean(abs(S.R_L2_motor(i,:))))) * (S.E_L2_motor(i,:)' * S.R_L2_motor(i,:));
-
-for task_idx = 1:numel(S.W_motor_L1_lat)
-    S.W_motor_L1_lat{task_idx} = S.W_motor_L1_lat{task_idx} + dW_motor_L1_lat;
-    S.W_motor_L2_lat{task_idx} = S.W_motor_L2_lat{task_idx} + dW_motor_L2_lat;
-    
-    % Decay diagonal and apply decay
-    S.W_motor_L1_lat{task_idx} = S.W_motor_L1_lat{task_idx} * 0.9999;
-    S.W_motor_L1_lat{task_idx}(1:size(S.W_motor_L1_lat{task_idx},1)+1:end) = 0;
-    
-    S.W_motor_L2_lat{task_idx} = S.W_motor_L2_lat{task_idx} * 0.9999;
-    S.W_motor_L2_lat{task_idx}(1:size(S.W_motor_L2_lat{task_idx},1)+1:end) = 0;
-end
-
 % Planning weight updates (ALL TASKS)
 layer_scale_plan_1 = max(0.1, mean(abs(S.R_L2_plan(i,:))));
 layer_scale_plan_3 = max(0.1, mean(abs(S.R_L3_plan(i,:))));
@@ -672,23 +607,7 @@ for task_idx = 1:numel(S.W_plan_L2_to_L1)
     end
 end
 
-dW_plan_L1_lat = -(P.eta_W * S.pi_L1_plan / max(0.1, mean(abs(S.R_L1_plan(i,:))))) * (S.E_L1_plan(i,:)' * S.R_L1_plan(i,:));
-dW_plan_L2_lat = -(P.eta_W * S.pi_L2_plan / max(0.1, mean(abs(S.R_L2_plan(i,:))))) * (S.E_L2_plan(i,:)' * S.R_L2_plan(i,:));
-
-for task_idx = 1:numel(S.W_plan_L1_lat)
-    S.W_plan_L1_lat{task_idx} = S.W_plan_L1_lat{task_idx} + dW_plan_L1_lat;
-    S.W_plan_L2_lat{task_idx} = S.W_plan_L2_lat{task_idx} + dW_plan_L2_lat;
-    
-    % Decay diagonal and apply decay
-    S.W_plan_L1_lat{task_idx} = S.W_plan_L1_lat{task_idx} * 0.9999;
-    S.W_plan_L1_lat{task_idx}(1:size(S.W_plan_L1_lat{task_idx},1)+1:end) = 0;
-    
-    S.W_plan_L2_lat{task_idx} = S.W_plan_L2_lat{task_idx} * 0.9999;
-    S.W_plan_L2_lat{task_idx}(1:size(S.W_plan_L2_lat{task_idx},1)+1:end) = 0;
-end
-
-S.learning_trace_W(i) = norm(dW_motor_1, 'fro') + norm(dW_motor_3, 'fro') + norm(dW_plan_1, 'fro') + norm(dW_plan_3, 'fro') + ...
-    norm(dW_motor_L1_lat,'fro') + norm(dW_motor_L2_lat,'fro') + norm(dW_plan_L1_lat,'fro') + norm(dW_plan_L2_lat,'fro');
+S.learning_trace_W(i) = norm(dW_motor_1, 'fro') + norm(dW_motor_3, 'fro') + norm(dW_plan_1, 'fro') + norm(dW_plan_3, 'fro');
 
 % ------------------------------
 % DYNAMIC PRECISION UPDATES
@@ -806,16 +725,71 @@ L2_motor_error_mag = sqrt(sum(S.E_L2_motor(i,:).^2));
 L1_plan_error_mag = sqrt(sum(S.E_L1_plan(i,:).^2));
 L2_plan_error_mag = sqrt(sum(S.E_L2_plan(i,:).^2));
 
-% Normalize error magnitudes to [0, 1] range for stable exponential scaling
-% (prevents 0 errors from causing huge precision changes, and caps huge errors)
-error_scale_factor = 0.1;  % Scale factor: 10% of max reasonable error = 1.0 for exp()
-L1_motor_error_norm = min(1.0, L1_motor_error_mag * error_scale_factor);
-L2_motor_error_norm = min(1.0, L2_motor_error_mag * error_scale_factor);
-L1_plan_error_norm = min(1.0, L1_plan_error_mag * error_scale_factor);
-L2_plan_error_norm = min(1.0, L2_plan_error_mag * error_scale_factor);
+% =========================================================================
+% Z-SCORE PRECISION ADAPTATION (NOV 3, 2025 - ADAPTIVE NORMALIZATION)
+% =========================================================================
+% REPLACES: Hardcoded error_scale_factor = 0.1 (task-dependent, arbitrary)
+% IMPROVES: Task-invariant normalization, adaptive to learning stage
+% =========================================================================
 
-% Exponential precision scaling: precision *= exp(alpha * error_norm)
-% Get alpha from PSO parameters (sensitivity parameter)
+% STEP 1: Maintain running error statistics (mean and variance)
+if ~isfield(S, 'error_statistics')
+    S.error_statistics = struct();
+    S.error_statistics.L1_motor_history = [];
+    S.error_statistics.L2_motor_history = [];
+    S.error_statistics.L1_plan_history = [];
+    S.error_statistics.L2_plan_history = [];
+end
+
+% STEP 2: Append current errors to history
+S.error_statistics.L1_motor_history = [S.error_statistics.L1_motor_history; L1_motor_error_mag];
+S.error_statistics.L2_motor_history = [S.error_statistics.L2_motor_history; L2_motor_error_mag];
+S.error_statistics.L1_plan_history = [S.error_statistics.L1_plan_history; L1_plan_error_mag];
+S.error_statistics.L2_plan_history = [S.error_statistics.L2_plan_history; L2_plan_error_mag];
+
+% STEP 3: Keep only recent history (sliding window of 100 steps)
+window_size = 100;
+if length(S.error_statistics.L1_motor_history) > window_size
+    S.error_statistics.L1_motor_history = S.error_statistics.L1_motor_history(end-window_size+1:end);
+    S.error_statistics.L2_motor_history = S.error_statistics.L2_motor_history(end-window_size+1:end);
+    S.error_statistics.L1_plan_history = S.error_statistics.L1_plan_history(end-window_size+1:end);
+    S.error_statistics.L2_plan_history = S.error_statistics.L2_plan_history(end-window_size+1:end);
+end
+
+% STEP 4: Compute z-scores (error in units of standard deviations)
+% Z-score = (x - mean) / std
+% This automatically adapts to task difficulty and learning stage
+
+% Helper function to compute z-score safely
+compute_z_score = @(error_mag, history) ...
+    (error_mag - mean(history)) / (std(history) + 1e-9);
+
+% Compute z-scores (NaN-safe)
+if length(S.error_statistics.L1_motor_history) >= 10
+    z_L1_motor = compute_z_score(L1_motor_error_mag, S.error_statistics.L1_motor_history);
+    z_L2_motor = compute_z_score(L2_motor_error_mag, S.error_statistics.L2_motor_history);
+    z_L1_plan = compute_z_score(L1_plan_error_mag, S.error_statistics.L1_plan_history);
+    z_L2_plan = compute_z_score(L2_plan_error_mag, S.error_statistics.L2_plan_history);
+else
+    % Not enough history: use simple linear scaling (3-sigma rule: ±3 std = [0,1] approx)
+    z_L1_motor = L1_motor_error_mag / (max(S.error_statistics.L1_motor_history) + 1e-9 + 1.0);
+    z_L2_motor = L2_motor_error_mag / (max(S.error_statistics.L2_motor_history) + 1e-9 + 1.0);
+    z_L1_plan = L1_plan_error_mag / (max(S.error_statistics.L1_plan_history) + 1e-9 + 1.0);
+    z_L2_plan = L2_plan_error_mag / (max(S.error_statistics.L2_plan_history) + 1e-9 + 1.0);
+end
+
+% STEP 5: Clip z-scores to [-3, +3] (3-sigma rule)
+% Errors beyond ±3 sigma are extreme outliers; cap them to prevent instability
+z_L1_motor_clipped = max(-3, min(3, z_L1_motor));
+z_L2_motor_clipped = max(-3, min(3, z_L2_motor));
+z_L1_plan_clipped = max(-3, min(3, z_L1_plan));
+z_L2_plan_clipped = max(-3, min(3, z_L2_plan));
+
+% STEP 6: Convert z-score to precision scaling (exponential)
+% Precision scaling = exp(alpha * z_score / 3)
+% Normalization by 3 ensures z_score in [-3,+3] maps to exponent in [-alpha, +alpha]
+% Result: High errors increase precision (tighter bounds), low errors decrease it
+
 if isfield(P, 'alpha_precision_gain')
     alpha_precision = P.alpha_precision_gain;
 else
@@ -823,10 +797,10 @@ else
 end
 
 % Apply exponential scaling (clipped to prevent overflow)
-precision_scale_L1_motor = exp(min(10, alpha_precision * L1_motor_error_norm));  % exp(max 10) = ~22k
-precision_scale_L2_motor = exp(min(10, alpha_precision * L2_motor_error_norm));
-precision_scale_L1_plan = exp(min(10, alpha_precision * L1_plan_error_norm));
-precision_scale_L2_plan = exp(min(10, alpha_precision * L2_plan_error_norm));
+precision_scale_L1_motor = exp(min(10, alpha_precision * z_L1_motor_clipped / 3));
+precision_scale_L2_motor = exp(min(10, alpha_precision * z_L2_motor_clipped / 3));
+precision_scale_L1_plan = exp(min(10, alpha_precision * z_L1_plan_clipped / 3));
+precision_scale_L2_plan = exp(min(10, alpha_precision * z_L2_plan_clipped / 3));
 
 % Update precisions with exponential scaling
 S.pi_L1_motor = S.pi_L1_motor * precision_scale_L1_motor;

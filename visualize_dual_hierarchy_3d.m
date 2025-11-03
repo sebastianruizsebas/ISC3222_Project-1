@@ -13,7 +13,7 @@ fprintf('║  DUAL-HIERARCHY VISUALIZATION: PLAYER CHASING BALL         ║\n');
 fprintf('║  Motor Region (Stable) + Planning Region (Task-Specific)  ║\n');
 fprintf('╚═══════════════════════════════════════════════════════════════╝\n\n');
 
-results_file = './tools/figures/3D_dual_hierarchy_results.mat';
+results_file = './figures/run_best_pso_20251102_2259.mat';
 if ~isfile(results_file)
     error('Results file not found: %s\nRun hierarchical_motion_inference_dual_hierarchy() first.', results_file);
 end
@@ -562,12 +562,33 @@ fprintf('WEIGHT MATRIX STATISTICS:\n');
 fprintf('─────────────────────────────────────────────────────────\n');
 
 fprintf('Motor Region:\n');
-fprintf('  W_motor_L2_to_L1 norm: %.4f (7×6 matrix)\n', norm(W_motor_L2_to_L1, 'fro'));
-fprintf('  W_motor_L3_to_L2 norm: %.4f (3×6 matrix)\n', norm(W_motor_L3_to_L2, 'fro'));
+% Use a safe accessor for norms to avoid errors if variables are missing or not numeric
+n1 = compute_matrix_norm_safe('W_motor_L2_to_L1');
+n2 = compute_matrix_norm_safe('W_motor_L3_to_L2');
+if isnan(n1)
+    fprintf('  W_motor_L2_to_L1 norm: n/a (missing or non-numeric)\n');
+else
+    fprintf('  W_motor_L2_to_L1 norm: %.4f\n', n1);
+end
+if isnan(n2)
+    fprintf('  W_motor_L3_to_L2 norm: n/a (missing or non-numeric)\n');
+else
+    fprintf('  W_motor_L3_to_L2 norm: %.4f\n', n2);
+end
 
 fprintf('Planning Region:\n');
-fprintf('  W_plan_L2_to_L1 norm:  %.4f (7×6 matrix)\n', norm(W_plan_L2_to_L1, 'fro'));
-fprintf('  W_plan_L3_to_L2 norm:  %.4f (3×6 matrix)\n\n', norm(W_plan_L3_to_L2, 'fro'));
+n3 = compute_matrix_norm_safe('W_plan_L2_to_L1');
+n4 = compute_matrix_norm_safe('W_plan_L3_to_L2');
+if isnan(n3)
+    fprintf('  W_plan_L2_to_L1 norm:  n/a (missing or non-numeric)\n');
+else
+    fprintf('  W_plan_L2_to_L1 norm:  %.4f\n', n3);
+end
+if isnan(n4)
+    fprintf('  W_plan_L3_to_L2 norm:  n/a (missing or non-numeric)\n\n');
+else
+    fprintf('  W_plan_L3_to_L2 norm:  %.4f\n\n', n4);
+end
 
 fprintf('TASK CONTEXT (L0):\n');
 fprintf('─────────────────────────────────────────────────────────\n');
@@ -586,3 +607,44 @@ fprintf('\n(Close figures to continue.)\n');
 
 % Keep windows open
 uiwait(msgbox('Visualizations complete! Close this dialog to exit.', 'Done'));
+
+%% Local helpers
+function n = compute_matrix_norm_safe(varname)
+% compute_matrix_norm_safe - safely compute Frobenius norm of a workspace variable
+% Accepts variable name (string). Returns NaN when variable is missing or not numeric.
+    n = NaN;
+    try
+        if ~evalin('caller', sprintf('exist(''%s'', ''var'')', varname))
+            return;
+        end
+        val = evalin('caller', varname);
+        if isempty(val)
+            return;
+        end
+        if isnumeric(val)
+            n = norm(double(val), 'fro');
+            return;
+        end
+        if iscell(val) && ~isempty(val)
+            % try first numeric cell
+            for i = 1:numel(val)
+                if isnumeric(val{i})
+                    n = norm(double(val{i}), 'fro'); return;
+                end
+            end
+            return;
+        end
+        if isstruct(val)
+            % search struct fields for a numeric array
+            f = fieldnames(val);
+            for i = 1:numel(f)
+                fld = val.(f{i});
+                if isnumeric(fld)
+                    n = norm(double(fld), 'fro'); return;
+                end
+            end
+        end
+    catch
+        % fall through and return NaN
+    end
+end

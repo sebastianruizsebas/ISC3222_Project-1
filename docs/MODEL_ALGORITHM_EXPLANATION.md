@@ -33,8 +33,16 @@ The helper `hierarchical_step_update(i, S, P)` is the authoritative per‑timest
   pred_L1_motor(i,:) = R_L2_motor(i,:) * W_motor_L2_to_L1' + R_L1_motor(i,:) * W_motor_L1_lat'
 - Planning predictions follow the same pattern with `W_plan_*` matrices.
 
-3) Extract motor commands and combine
-- Predicted L1 velocity channels (semantic `idx_vel`) are mapped to motor command components (`motor_v*_motor`, `motor_v*_plan`), then blended 50:50 and damped via `P.damping` to produce player velocities and integrated into positions.
+3) Extract motor commands (Pure Predictive Coding — Nov 2, 2025 FIX #2)
+- Predicted L1 velocity channels (semantic `idx_vel`) are mapped to motor command components (`motor_v*_motor`, `motor_v*_plan`)
+- **Motor executes ONLY motor region predictions** (pure, unblended):
+  ```matlab
+  final_motor_vx = S.motor_vx_motor(i);  % No blending with planning
+  S.vx_player(i+1) = P.damping * S.vx_player(i) + final_motor_vx;
+  ```
+- Planning predictions (`motor_v*_plan`) are computed (for diagnostics) but NOT used in execution
+- This ensures **execution = prediction** (core predictive coding axiom)
+- Planning influences motor **through weight learning across trials**, not moment-by-moment blending
 
 4) Error computation (prediction errors)
 - L1 errors (E_L1_motor, E_L1_plan) = observed_state − pred_L1_* (on semantic indices).
@@ -122,254 +130,291 @@ If you want, I can apply any of the recommended patches automatically. Tell me w
 
 ---
 
-## UPDATE (Nov 1, 2025): Task-Conditional Learning with Multiplicative Gating
+## UPDATE (Nov 2, 2025): Critical Implementation Fixes (v4) — Five Theoretical Corrections
 
-### Overview of Changes
-Three major improvements were added to fix the fundamental **task context disconnection** problem:
+### Overview: Five Fixes Correcting Nov 1 Documentation
 
-1. **Multiplicative Task Gating** — L0 now actively gates predictions
-2. **Task-Indexed Weight Matrices** — Separate weights per task prevent catastrophic forgetting
-3. **Task-Selective Weight Updates** — Only active task learns; off-task weights remain frozen
+On November 2, 2025, comprehensive code audit revealed **five critical misalignments** between the Nov 1 documentation and actual implementation. All fixes have been applied to the codebase. This section documents the *correct* implementation.
 
-These changes implement biologically-plausible prefrontal control mechanisms and dramatically improve multi-task learning.
+| # | Issue | Nov 1 (Incorrect) | Nov 2 (Correct) |
+|---|-------|------|---------|
+| FIX #1 | Prediction gating | `pred *= task_gate` | Pure: `pred` (no gating) |
+| FIX #2 | Execution formula | Gated predictions | Pure predictions executed |
+| FIX #3 | Representation gating | `R += eta * E * task_gate` | Pure: `R += eta * E` |
+| FIX #4 | Off-task weights | Frozen (no learning) | Learn with penalty opposition |
+| FIX #5 | PSO parameters | `alpha_precision_gain` unused | All 17 parameters now used ✓ |
 
-### Problem Being Solved
-Previously, the task context representation `R_L0` was **computationally inert**—it was updated each trial but never used in predictions or learning. This meant:
-- Motor and planning regions predicted the same way regardless of task
-- All tasks interfered with each other (weight updates were global)
-- Each trial's learning partially undid previous trials' learning
-- The "dual hierarchy" concept was only partially implemented
+**Key insight:** Task context enters via **weight indexing + interference penalty**, not multiplicative gating. This aligns with single-dopamine-signal control theory (synaptic tagging via D1/D2 pathways).
 
-### Solution 1: Multiplicative Gating of Predictions
+---
 
-**Location:** `hierarchical_step_update.m`, prediction section (line ~130)
+### FIX #1: Remove Multiplicative Task Gating from Predictions
 
-**Key equations:**
+**What Nov 1 said (incorrect):**
 ```matlab
-% Identify active task from L0 (one-hot encoding)
-[~, current_task_idx] = max(S.R_L0(i,:));
-
-% Get task-specific weight matrices
-W_motor_L2_to_L1_active = S.W_motor_L2_to_L1{current_task_idx};
-...
-
-% Task-context gating strength (multiplicative)
-task_gate_motor = S.R_L0(i, current_task_idx);  % ~1.0 (motor learns universally)
-task_gate_plan = S.R_L0(i, current_task_idx) * 0.8 + 0.2;  % [0.2, 1.0] (planning task-specific)
-
-% Motor predictions with task gating
-S.pred_L1_motor(i,:) = task_gate_motor * (S.R_L2_motor(i,:) * W_motor_L2_to_L1_active' + ...);
-
-% Planning predictions with weaker gating
-S.pred_L1_plan(i,:) = task_gate_plan * (S.R_L2_plan(i,:) * W_plan_L2_to_L1_active' + ...);
+task_gate_motor = S.R_L0(i, current_task_idx);  % ~1.0
+S.pred_L1_motor(i,:) = task_gate_motor * (R_L2 * W');
 ```
 
-**Biological basis (Mante et al., 2013):**
-- Prefrontal cortex (PFC) uses multiplicative context-dependent gain to gate information flow
-- Neurons in M1/PMd show reduced responsiveness when task context is mismatched
-- Acetylcholine (ACh) and noradrenaline (NE) implement this gain modulation
-
-**Effect on learning:**
-- When `task_gate = 0`, predictions are zeroed → large errors → strong learning signal
-- When `task_gate = 1`, predictions are fully active → normal error-driven learning
-- Motor region (`task_gate_motor ≈ 1`) learns stable forward models that generalize
-- Planning region (`task_gate_plan ∈ [0.2, 1]`) learns task-specific strategies
-
-### Solution 2: Task-Indexed Weight Matrices
-
-**Location:** `hierarchical_motion_inference_dual_hierarchy.m`, initialization (line ~650)
-
-**Key data structure change:**
+**Actual Nov 2 implementation** (`hierarchical_step_update.m`, lines ~210-240):
 ```matlab
-% OLD: Global weights (catastrophic interference)
-W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);  % shared across all tasks
+% Motor predictions are PURE (no multiplicative gating)
+S.pred_L1_motor(i,:) = S.R_L2_motor(i,:) * W_motor_L2_to_L1_active' + S.R_L1_motor(i,:) * W_motor_L1_lat_active';
 
-% NEW: Task-indexed weights (no interference)
-W_motor_L2_to_L1 = cell(n_trials, 1);  % separate copy per task
-for task_idx = 1:n_trials
-    W_motor_L2_to_L1{task_idx} = zeros(n_L1_motor, n_L2_motor);
-    % ... initialize per-task ...
-end
+% Planning predictions are also PURE (no multiplicative gating)
+S.pred_L1_plan(i,:) = S.R_L2_plan(i,:) * W_plan_L2_to_L1_active' + S.R_L1_plan(i,:) * W_plan_L1_lat_active';
 ```
 
-**Per-task initialization:**
-- Each task gets identical initial weight structure
-- But **learning happens independently** per task
-- At trial boundaries, no decay is applied (weights preserved exactly)
+**Why this is correct:**
+- **Predictive coding axiom:** execution = prediction. Multiplicative gating violates this (they become inequal).
+- **Theoretical coherence:** Task context selects WHICH weights are active, not the magnitude of prediction.
+- **Biological mapping:** M1→muscle is unmodulated; task gating happens at PMd→M1 (planning input gating, not motor output).
 
-**Biological basis (Rigotti et al., 2013; "Multiplexed Coding"):**
-- PFC and M1 populations learn multiple input-output mappings simultaneously
-- Different task contexts activate different neuronal subspaces
-- Population covariance structure rotates/rescales per task rather than overwriting
+---
 
-**Memory impact:**
-- Storage grows linearly with `n_trials` (4× memory for 4 tasks)
-- For reasonable task counts (2-10), negligible overhead
-- Speed unchanged (single task active at any time)
+### FIX #2: Pure Predictive Coding Execution
 
-### Solution 3: Task-Selective Weight Updates
-
-**Location:** `hierarchical_step_update.m`, weight update section (line ~330)
-
-**Key mechanism:**
+**Correct Nov 2 implementation** (`hierarchical_step_update.m`, lines ~200-215):
 ```matlab
-% OLD: All tasks' weights updated every step
-S.W_motor_L2_to_L1 = S.W_motor_L2_to_L1 + dW_motor_1;
+% Extract velocity predictions from motor L1 (semantic indices idx_vel)
+pred_vel_motor = S.pred_L1_motor(i, idx_vel);
+pred_vel_plan = S.pred_L1_plan(i, idx_vel);
 
-% NEW: Only active task's weights updated
-S.W_motor_L2_to_L1{current_task_idx} = S.W_motor_L2_to_L1{current_task_idx} + dW_motor_1;
+% PURE MOTOR EXECUTION (NO BLENDING - Strategy A, Nov 2, 2025)
+% Motor executes learned motor predictions exclusively
+final_motor_vx = S.motor_vx_motor(i);
+final_motor_vy = S.motor_vy_motor(i);
+final_motor_vz = S.motor_vz_motor(i);
 
-% Off-task weights remain frozen (no plastic updates)
-% They only change when that task becomes active
+% Kinematics: execution = prediction (predictive coding axiom)
+S.vx_player(i+1) = P.damping * S.vx_player(i) + final_motor_vx;
+S.vy_player(i+1) = P.damping * S.vy_player(i) + final_motor_vy;
+S.vz_player(i+1) = P.damping * S.vz_player(i) + final_motor_vz;
 ```
 
-**Credit assignment principle:**
-- Motor errors at time step `i` should only update the motor model used to generate those errors
-- If task A's motor model is active, task B's model sees the data but **does not learn**
-- This prevents spurious correlations and catastrophic forgetting
+**Key points:**
+- ✅ **Execution = Prediction** (purely motor, 100% learned, no blending)
+- ✅ **Planning is computed separately** (`motor_v*_plan` computed for diagnostics but NOT used in execution)
+- ✅ **Planning influences motor through weight learning**, not moment-by-moment blending
+- ✅ **Temporal timescales match neurobiology**: 
+  - Motor output: immediate (10-50ms via M1 layer 5B)
+  - Planning influence: slow (multi-trial via weight decay and context switching)
 
-**Biological basis (Hippocampal Pattern Separation):**
-- Hippocampus uses sparse, orthogonal codes to separate different contexts (Rolls & Stringer, 2020)
-- This orthogonality extends to cortical columns via feedback from HC→cortex
-- Goal: prevent one task from corrupting another's learned synaptic weights
+**Why removal of blending improves learning:**
+- Motor learns clean reaching dynamics (not corrupted by planning signals)
+- Planning learns ball dynamics (not confounded with motor execution)
+- Error signals are causally valid (execution matches prediction for motor hierarchy)
+- PSO convergence faster (fewer confounded parameters)
 
-### Cross-Task Error Computation (Diagnostic)
+---
 
-**Location:** `hierarchical_step_update.m`, error section (line ~220)
+### FIX #3: Remove Task Gating from Representation Updates
 
-**New computation:**
+**What Nov 1 said (incorrect):**
 ```matlab
-% For each candidate task, compute what error would occur IF that task were active
-for task_candidate = 1:numel(S.W_motor_L2_to_L1)
-    W_motor_cand = S.W_motor_L2_to_L1{task_candidate};
-    pred_cand = S.R_L2_motor(i,:) * W_motor_cand';
-    
-    % Error IF task_candidate were predicting
-    E_candidate = obs - pred_cand;
-    S.task_errors_motor(i, task_candidate) = norm(E_candidate);
-end
+S.R_L1_plan(i+1,:) = task_gate_plan * (S.R_L1_plan(i,:) + eta_rep * dR_L1_plan);
 ```
 
-**Purpose:**
-1. **Diagnostics:** Track whether off-task models are drifting or staying stable
-2. **Interference penalty:** Optionally penalize off-task errors in free energy:
-   ```matlab
-   % Discourage off-task predictions from becoming good predictors of current data
-   for t ≠ current_task_idx
-       F(i) += interference_weight * task_errors_motor(i, t)^2
-   ```
-
-**Output:** `S.task_errors_motor` and `S.task_errors_plan` arrays track per-task prediction errors over time
-
-### Updated Free Energy with Interference Penalty
-
-**Location:** `hierarchical_step_update.m`, free energy section (line ~260)
-
-**New term:**
+**Actual Nov 2 implementation** (`hierarchical_step_update.m`, lines ~490-550):
 ```matlab
-% Base free energy (unchanged)
-F_base = sum(E_L1_motor.^2)/(2*pi) + sum(E_L2_motor.^2)/(2*pi) + ...
+% L1 updates: direct error integration (NO multiplicative task gate)
+S.R_L1_motor(i+1,:) = P.momentum * S.R_L1_motor(i,:) + P.eta_rep * dR_L1_motor;
+S.R_L1_plan(i+1,:) = P.momentum * S.R_L1_plan(i,:) + P.eta_rep * dR_L1_plan;
 
-% NEW: Interference penalty (optional)
-interference_weight = P.interference_penalty_weight;  % default 0.01
-if interference_weight > 0
-    for task ≠ current_task_idx
-        F += interference_weight * (task_errors_motor(i, task)^2 + task_errors_plan(i, task)^2)
+% L2 updates: coupled to L1 errors via learned weights (NO multiplicative task gate)
+S.R_L2_motor(i+1,:) = P.momentum * S.R_L2_motor(i,:) + decay * P.eta_rep * delta_R_L2_motor;
+S.R_L2_plan(i+1,:) = P.momentum * S.R_L2_plan(i,:) + decay * P.eta_rep * delta_R_L2_plan;
+
+```% L3 updates: driven by averaged L2 errors (NO multiplicative task gate)
+S.R_L3_motor(i+1,:) = S.R_L3_motor(i,:) + P.eta_rep * E_L3_motor_proj;
+S.R_L3_plan(i+1,:) = S.R_L3_plan(i,:) + P.eta_rep * E_L3_plan_proj;
+```
+
+**Rationale:**
+- Representations are hierarchical inference variables; they infer best estimate of latent state given observations.
+- No reason to suppress inference based on task (all observations are valid for inference in all hierarchies).
+- Task selectivity emerges naturally: different tasks produce different errors → different R trajectories.
+
+---
+
+### FIX #4: Interference Penalty Now Drives Weight Learning
+
+**What Nov 1 said (incorrect/incomplete):**
+> "Off-task weights remain frozen (no plastic updates)... penalty only affects free energy"
+
+**Actual Nov 2 implementation** (`hierarchical_step_update.m`, lines ~560-600):
+```matlab
+% Compute normal weight update (for active task)
+dW_motor_1 = -(P.eta_W * pi_L1_motor / layer_scale) * (E_L1_motor' * R_L2_motor);
+
+% For EACH task, apply appropriate update rule
+for task_idx = 1:numel(S.W_motor_L2_to_L1)
+    if task_idx == current_task_idx
+        % Active task: normal error-driven update
+        S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} + dW_motor_1;
+    else
+        % Off-task: interference penalty opposes learning on current data
+        if P.interference_penalty_weight > 0
+            % Compute what error this off-task weight would produce on current data
+            W_off = S.W_motor_L2_to_L1{task_idx};
+            pred_off = S.R_L2_motor(i,:) * W_off';
+            E_off = S.E_L1_motor(i,:) - pred_off;
+            
+            % Penalty gradient: pushes weights AWAY from current task's manifold
+            penalty_gradient = P.interference_penalty_weight * (E_off' * R_L2_motor);
+            
+            % Update: normal learning MINUS penalty opposition
+            S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} + dW_motor_1 - penalty_gradient;
+        end
     end
 end
 ```
 
-**Effect:**
-- Encourages learned models to specialize for their task (not memorize all tasks)
-- Prevents "universal predictor" scenario where one model learns everything
-- Optional: set `interference_weight = 0` to disable (weights still frozen anyway)
+**Effect on learning:**
+- **Active task weights**: Learn normally (error gradient when large errors occur)
+- **Off-task weights**: Learn slowly (error gradient opposed by penalty term)
+- **Result**: Natural task specialization (weights separate without explicit freezing)
 
-### Data Flow Summary
-
-```
-Input: observation o_t, task context R_L0(i)
-
-1. Identify active task: current_task_idx = argmax(R_L0(i))
-
-2. Load active task's weights: W_active = W{current_task_idx}
-
-3. Gate predictions by task context:
-   pred = task_gate * R * W_active'     [multiplicative gating]
-
-4. Compute ALL task's errors (for monitoring):
-   for each task_j:
-       E_j = o - R * W{j}'              [cross-task error]
-
-5. Update ONLY active task's weights:
-   dW = -eta * E * R'
-   W{current_task_idx} += dW            [selective update]
-   
-6. Return updated S (with W cells modified in-place)
-```
-
-### Integration with Existing Code
-
-**Backward compatibility:**
-- All existing initialization code works (just wrapped in cells)
-- P struct unchanged (no new required parameters)
-- Optional: `P.interference_penalty_weight` for cross-task penalty
-
-**Parameters to tune:**
-- `eta_W`: weight learning rate (unchanged semantics)
-- `interference_penalty_weight`: 0.0–0.1 (default 0.01)
-- Task-specific decay: `decay_motor`, `decay_plan` (now preserved exactly since no global decay)
-
-**Output changes:**
-- Results now contain `results.task_errors_motor` [N × n_trials] — diagnostic
-- Results contain `results.W_motor_L2_to_L1` as cell array instead of matrix
-
-### Expected Improvements
-
-With task context now properly connected:
-
-✓ **Motor region**: Learns faster, transfers across trials (error decreases monotonically if dynamics stable)
-
-✓ **Planning region**: Learns task-specific strategies without interference (per-task learning curves independent)
-
-✓ **Interception performance**: Improves steadily per trial (no unlearning from previous trials)
-
-✓ **Free energy**: Drops faster overall (fewer task-inappropriate predictions)
-
-✓ **Weight stability**: Off-task weights frozen → diagnostic cross-task errors plateau
-
-### Diagnostic Plots to Create
-
+**Updated free energy:**
 ```matlab
-% Plot 1: Per-task error curves (one line per task)
-plot(results.task_errors_motor)
-title('Motor Model Errors (All Tasks)'), ylabel('||Error||'), xlabel('Step')
-legend('Task 1', 'Task 2', 'Task 3', 'Task 4')
-
-% Plot 2: Active vs off-task errors
-active_errors = diag(results.task_errors_motor(:, trial_indices));
-plot(active_errors, 'b-', 'LineWidth', 2)
-hold on; plot(sum(results.task_errors_motor, 2) - active_errors, 'r--', 'LineWidth', 1)
-title('Active Task Error vs Cross-Task Interference')
-legend('Active Task Error', 'Off-Task Errors (summed)')
-
-% Plot 3: Weight norms per task (measure learning)
-for t = 1:n_tasks
-    plot(cellfun(@(w) norm(w, 'fro'), results.W_motor_L2_to_L1{t}), 'DisplayName', sprintf('Task %d', t))
-    hold on
-end
-title('Motor Weight Frobenius Norm Evolution')
+F(i) = sum(E_L1_motor.^2)/(2*pi_L1_motor) + ... [base errors]
+     + interference_penalty_weight * sum([E_off_task.^2 for all off-tasks])
 ```
-
-### Citation & Further Reading
-
-These improvements are grounded in:
-- **Multiplicative gating**: Mante et al. (2013) *Neuron* — context-dependent dynamics in PFC
-- **Task-indexed learning**: Rigotti et al. (2013) *Nat. Neurosci.* — multiplexed coding and task flexibility
-- **Pattern separation**: Rolls & Stringer (2020) *Prog. Neurobiol.* — hippocampal role in context separation
-- **Multi-task meta-learning**: Finn et al. (2017) "Model-Agnostic Meta-Learning" (*ICML*) — related principles from ML
 
 ---
 
-File updated with comprehensive task-conditional learning documentation.
+### FIX #5: All 17 PSO Parameters Now Active
+
+**Problem identified:** PSO computed `alpha_precision_gain` and `pi_L*_max` bounds but code used hard-coded values.
+
+**Correct implementation** (`hierarchical_step_update.m`, lines ~730-810):
+```matlab
+% Compute error-driven exponential scaling
+L1_motor_error_mag = sqrt(sum(S.E_L1_motor(i,:).^2));
+error_scale_factor = 0.1;  % Normalize error to [0,1] range
+L1_motor_error_norm = min(1.0, L1_motor_error_mag * error_scale_factor);
+
+% Exponential scaling uses PSO-optimized parameter (NOW ACTIVE)
+alpha_precision = P.alpha_precision_gain;
+precision_multiplier = exp(alpha_precision * L1_motor_error_norm);
+
+% Apply PSO-provided bounds (NOW ACTIVE)
+pi_L1_motor_bound_min = P.pi_bounds.L1_motor(1);
+pi_L1_motor_bound_max = P.pi_bounds.L1_motor(2);
+
+% Update precision with clamping to bounds
+pi_L1_motor_new = precision_multiplier * pi_L1_motor_curr;
+pi_L1_motor_new = max(pi_L1_motor_bound_min, min(pi_L1_motor_bound_max, pi_L1_motor_new));
+```
+
+**All 17 PSO parameters now used:**
+1. `eta_rep` — Representation learning rate
+2. `eta_W` — Weight matrix learning rate
+3. `momentum` — Representation momentum
+4. `weight_decay` — Lateral weight decay
+5. `interference_penalty_weight` — Off-task opposition strength
+6. `alpha_precision_gain` — ✓ NOW USED (precision scaling rate)
+7. `pi_L1_motor_max` — ✓ NOW USED (motor L1 ceiling)
+8. `pi_L2_motor_max` — ✓ NOW USED (motor L2 ceiling)
+9. `pi_L1_plan_max` — ✓ NOW USED (planning L1 ceiling)
+10. `pi_L2_plan_max` — ✓ NOW USED (planning L2 ceiling)
+11. `gravity` — Physics: ball z-acceleration
+12. `restitution` — Physics: bounce energy
+13. `ground_friction` — Physics: lateral bounce friction
+14. `air_drag` — Physics: velocity decay
+15. `vmax_ball` — Physics: max ball speed
+16. `min_start_sep` — Physics: min player-ball separation
+17. `motor_gain` — Execution mapping: velocity scale
+
+---
+
+### Corrected Data Flow (Nov 2 — Strategy A: Pure Motor Execution)
+
+```
+INPUT:
+  Observation o_t
+  Task context: current_task_idx = argmax(R_L0(i))
+  
+STEP 1: LOAD ACTIVE TASK WEIGHTS
+  W_motor_active = W_motor_L2_to_L1{current_task_idx}
+  W_plan_active = W_plan_L2_to_L1{current_task_idx}
+  
+STEP 2: PURE PREDICTIONS (NO MULTIPLICATIVE GATING)
+  pred_L1_motor = R_L2_motor * W_motor_active'
+  pred_L1_plan = R_L2_plan * W_plan_active'
+  
+STEP 3: PURE MOTOR EXECUTION (NO BLENDING - Strategy A)
+  final_motor_command = motor_vx_motor(i), motor_vy_motor(i), motor_vz_motor(i)
+  execute = final_motor_command  [100% motor, no planning blending]
+  
+  NOTE: Planning predictions computed but NOT executed
+        Planning influences motor ONLY through:
+        - Weight decay at trial boundaries (multi-trial timescale)
+        - Shared error signal from ball observations
+  
+STEP 4: COMPUTE ERRORS (MOTOR LEARNS FROM MOTOR-DRIVEN EXECUTION)
+  E_motor = observation - pred_motor  [error validates motor's prediction]
+  E_plan = observation - pred_plan    [error validates planning's prediction]
+  
+STEP 5: UPDATE REPRESENTATIONS (DIRECT, NO GATING)
+  R_L1 += eta_rep * E_motor  [no multiplicative modulation]
+  R_L2 += eta_rep * (W' * E_L1)
+  R_L3 += eta_rep * avg(E_L2)
+  
+STEP 6: UPDATE ACTIVE TASK'S WEIGHTS (NORMAL ERROR-DRIVEN)
+  dW_active = -eta_W * pi * E' * R
+  W{current_task} += dW_active
+  
+STEP 7: UPDATE OFF-TASK WEIGHTS (INTERFERENCE PENALTY OPPOSITION)
+  For each task_j ≠ current_task_idx:
+    E_off = observation - R * W{task_j}'
+    penalty_grad = interference_weight * E_off' * R
+    W{task_j} += dW_active - penalty_grad
+    
+STEP 8: UPDATE PRECISION (ERROR-DRIVEN, PSO-CONTROLLED)
+  error_norm = min(1.0, ||E|| * 0.1)
+  pi_new = exp(alpha_precision_gain * error_norm) * pi_curr
+  pi_new = clamp(pi_new, min_bound, max_bound)
+  
+OUTPUT: Updated S with R, W, pi, free_energy
+```
+
+**Key Difference from Nov 1:**
+- STEP 3: Changed from "50:50 blending" to "100% pure motor execution"
+- Result: Execution = Prediction (predictive coding axiom satisfied)
+- Motor and planning learn independently without mutual interference
+
+---
+
+### Summary of Corrections
+
+| Component | Nov 1 (Incorrect) | Nov 2 (Correct - Strategy A) |
+|-----------|------|---------|
+| **Predictions** | `pred *= task_gate` | Pure: no gating ✓ |
+| **Execution** | Blended: 50% motor + 50% planning | **Pure motor (100% motor): execution = prediction** ✓ |
+| **Representations** | `R += eta * E * task_gate` | Pure: `R += eta * E` ✓ |
+| **Off-task learning** | Frozen (no updates) | Active with penalty opposition ✓ |
+| **PSO parameters** | 10/17 used | 17/17 used ✓ |
+| **Theory alignment** | Inconsistent (pred ≠ exec) | **Consistent (pred = exec) — Predictive Coding Axiom Satisfied ✓** |
+
+---
+
+## Strategy A Implementation Summary (Nov 2, 2025)
+
+**Problem Solved:** Removed 50:50 blending that violated predictive coding principle (execution ≠ prediction)
+
+**Key Changes:**
+1. Motor now executes pure learned predictions (no planning mixture)
+2. Planning influences motor through weight learning, not execution blending
+3. Error signals are now causally valid (execution exactly matches what motor hierarchy predicts)
+4. Motor and planning learn independently (no mutual interference on same step)
+
+**Expected Improvements:**
+- ✅ Faster PSO convergence (fewer confounded parameters)
+- ✅ Higher final interception accuracy (cleaner motor control)
+- ✅ Better generalization (motor learns general reaching, not task-specific tricks)
+- ✅ Neuroscientific coherence (aligns with laminar motor output architecture)
+
+All corrections have been applied to the codebase as of Nov 2, 2025.
 
 ```
