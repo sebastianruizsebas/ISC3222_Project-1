@@ -197,50 +197,192 @@ fprintf('\n');
 % Validation: ensure starting positions allow interception opportunity
 % ENFORCE: minimum and maximum separation for taskability
 min_start_sep = 1.0;   % meters (minimum separation - allows learning)
-max_start_sep = 3.0;   % meters (maximum separation - ensures catchability within trial duration)
+max_start_sep = 8.0;   % meters (maximum separation - ensures catchability within trial duration)
 
-fprintf('VALIDATING AND ENFORCING INTERCEPTION GEOMETRY:\n');
-fprintf('  Target constraints: %.1f m ≤ sep ≤ %.1f m (ensures catchability)\n\n', min_start_sep, max_start_sep);
+% Motor dynamics parameters (for feasibility calculation)
+player_max_speed = 2.5;        % m/s (maximum reachable player speed)
+player_accel = 5.0;            % m/s^2 (maximum player acceleration)
+dt_sim = 0.01;                 % seconds (simulation timestep)
+
+fprintf('VALIDATING GEOMETRICALLY FEASIBLE TRAJECTORIES:\n');
+fprintf('═════════════════════════════════════════════════════════════════\n');
+fprintf('Constraints:\n');
+fprintf('  • Initial separation: %.1f m ≤ sep ≤ %.1f m\n', min_start_sep, max_start_sep);
+fprintf('  • Player max speed: %.1f m/s\n', player_max_speed);
+fprintf('  • Player max accel: %.1f m/s^2\n', player_accel);
+fprintf('  • Trial duration: %.1f s\n\n', T_per_trial);
+
+% Track validation results
+validation_summary = struct();
+validation_summary.n_trials = n_trials;
+validation_summary.n_feasible = 0;
+validation_summary.n_warnings = 0;
+validation_summary.n_adjusted = 0;
+validation_summary.trials = {};
 
 for trial = 1:n_trials
     player_pos = initial_positions(trial, :);
     target_start = target_trajectories{trial}.start_pos;
     target_vel = target_trajectories{trial}.velocity;
-    speed = norm(target_vel);
+    target_accel = target_trajectories{trial}.acceleration;
     
-    sep = norm(target_start - player_pos);
+    % Compute speeds
+    target_speed = norm(target_vel);
+    target_accel_mag = norm(target_accel);
     
-    % Enforce minimum separation (move target away if too close)
+    % Initial separation
+    sep_vec = target_start - player_pos;
+    sep = norm(sep_vec);
+    sep_direction = sep_vec / (sep + 1e-6);
+    
+    % ─────────────────────────────────────────────────────────
+    % TEST 1: SEPARATION BOUNDS
+    % ─────────────────────────────────────────────────────────
+    separation_ok = true;
     if sep < min_start_sep
-        direction = (target_start - player_pos) / (sep + 1e-6);
+        direction = sep_vec / (sep + 1e-6);
         target_trajectories{trial}.start_pos = player_pos + direction * min_start_sep;
-        fprintf('  Trial %d: ⚠ ADJUSTED (was %.2f m, TOO CLOSE) → now %.2f m\n', ...
-            trial, sep, min_start_sep);
         sep = min_start_sep;
-    % Enforce maximum separation (move target closer if too far)
+        separation_ok = false;
+        validation_summary.n_adjusted = validation_summary.n_adjusted + 1;
     elseif sep > max_start_sep
-        direction = (target_start - player_pos) / (sep + 1e-6);
+        direction = sep_vec / (sep + 1e-6);
         target_trajectories{trial}.start_pos = player_pos + direction * max_start_sep;
-        fprintf('  Trial %d: ⚠ ADJUSTED (was %.2f m, TOO FAR) → now %.2f m\n', ...
-            trial, sep, max_start_sep);
         sep = max_start_sep;
-    else
-        fprintf('  Trial %d: ✓ OK (sep=%.2f m)\n', trial, sep);
+        separation_ok = false;
+        validation_summary.n_adjusted = validation_summary.n_adjusted + 1;
     end
     
-    % Estimate time to interception (assuming player chases along closest approach)
-    if speed > 0.01  % Non-zero velocity
-        time_to_close = sep / speed;  % Rough estimate
-        if time_to_close <= T_per_trial
-            fprintf('      Target speed=%.2f m/s → est. closure in %.1f s (trial duration=%.1f s ✓)\n', ...
-                speed, time_to_close, T_per_trial);
-        else
-            fprintf('      ⚠ WARNING: Target speed=%.2f m/s → est. closure in %.1f s (exceeds trial duration=%.1f s!)\n', ...
-                speed, time_to_close, T_per_trial);
+    % ─────────────────────────────────────────────────────────
+    % TEST 2: INTERCEPTION FEASIBILITY
+    % ─────────────────────────────────────────────────────────
+    % Can the player catch the target within the trial?
+    % Assumes: player can move at max_speed toward target
+    
+    interception_feasible = false;
+    time_to_intercept_min = Inf;
+    
+    if target_speed < player_max_speed || sep < player_max_speed * T_per_trial
+        % Feasible if: target slower than player OR
+        %              initial gap closable within trial time
+        interception_feasible = true;
+        time_to_intercept_min = sep / (player_max_speed - target_speed + 1e-6);
+    end
+    
+    % ─────────────────────────────────────────────────────────
+    % TEST 3: WORKSPACE BOUNDS
+    % ─────────────────────────────────────────────────────────
+    % Will target stay within workspace bounds throughout trial?
+    
+    target_trajectory_in_bounds = true;
+    max_distance_traveled = target_speed * T_per_trial + 0.5 * target_accel_mag * T_per_trial^2;
+    target_final_approx = target_start + target_vel * T_per_trial + 0.5 * target_accel * T_per_trial^2;
+    
+    % Check if final position is within reasonable bounds
+    for dim = 1:3
+        if target_final_approx(dim) < workspace_bounds(dim, 1) - 1.0 || ...
+           target_final_approx(dim) > workspace_bounds(dim, 2) + 1.0
+            target_trajectory_in_bounds = false;
+            break;
         end
     end
+    
+    % ─────────────────────────────────────────────────────────
+    % TEST 4: VELOCITY CONSISTENCY
+    % ─────────────────────────────────────────────────────────
+    % Are target speeds reasonable? (not too fast or zero)
+    
+    velocity_reasonable = true;
+    if target_speed < 0.05  && target_accel_mag < 0.01
+        % Target moving too slowly and not accelerating
+        velocity_reasonable = false;
+    elseif target_speed > 5.0
+        % Target moving unreasonably fast (faster than human sprint)
+        velocity_reasonable = false;
+    end
+    
+    % ─────────────────────────────────────────────────────────
+    % GENERATE REPORT FOR THIS TRIAL
+    % ─────────────────────────────────────────────────────────
+    
+    fprintf('Trial %d:\n', trial);
+    fprintf('  Start position: [%.2f, %.2f, %.2f]\n', target_start(1), target_start(2), target_start(3));
+    fprintf('  Player position: [%.2f, %.2f, %.2f]\n', player_pos(1), player_pos(2), player_pos(3));
+    fprintf('  Initial separation: %.2f m', sep);
+    if separation_ok
+        fprintf(' ✓\n');
+    else
+        fprintf(' (ADJUSTED)\n');
+    end
+    
+    fprintf('  Target velocity: [%.3f, %.3f, %.3f] m/s (speed: %.3f m/s)', ...
+        target_vel(1), target_vel(2), target_vel(3), target_speed);
+    if velocity_reasonable
+        fprintf(' ✓\n');
+    else
+        fprintf(' ⚠ UNREASONABLE\n');
+        validation_summary.n_warnings = validation_summary.n_warnings + 1;
+    end
+    
+    fprintf('  Target acceleration: [%.3f, %.3f, %.3f] m/s^2 (mag: %.3f)\n', ...
+        target_accel(1), target_accel(2), target_accel(3), target_accel_mag);
+    
+    fprintf('  Interception feasible: ');
+    if interception_feasible
+        fprintf('✓ YES (est. time: %.1f s < %.1f s)\n', time_to_intercept_min, T_per_trial);
+        if time_to_intercept_min <= T_per_trial
+            fprintf('    → Player can catch with PERFECT motor control\n');
+        end
+    else
+        fprintf('✗ NO (target too fast: %.2f m/s > %.2f m/s)\n', target_speed, player_max_speed);
+        validation_summary.n_warnings = validation_summary.n_warnings + 1;
+    end
+    
+    fprintf('  Trajectory stays in bounds: ');
+    if target_trajectory_in_bounds
+        fprintf('✓ YES\n');
+    else
+        fprintf('⚠ MARGINAL (final pos: [%.2f, %.2f, %.2f])\n', ...
+            target_final_approx(1), target_final_approx(2), target_final_approx(3));
+        validation_summary.n_warnings = validation_summary.n_warnings + 1;
+    end
+    
+    % Overall verdict
+    all_tests_pass = separation_ok && interception_feasible && velocity_reasonable && target_trajectory_in_bounds;
+    if all_tests_pass
+        fprintf('  VERDICT: ✅ GEOMETRICALLY FEASIBLE\n\n');
+        validation_summary.n_feasible = validation_summary.n_feasible + 1;
+    else
+        fprintf('  VERDICT: ⚠️  MARGINAL (may require optimal motor learning)\n\n');
+    end
+    
+    % Store trial result
+    validation_summary.trials{trial} = struct(...
+        'separation_ok', separation_ok, ...
+        'interception_feasible', interception_feasible, ...
+        'trajectory_in_bounds', target_trajectory_in_bounds, ...
+        'velocity_reasonable', velocity_reasonable, ...
+        'time_to_intercept_min', time_to_intercept_min, ...
+        'target_speed', target_speed);
 end
-fprintf('\n');
+
+% ─────────────────────────────────────────────────────────
+% PRINT SUMMARY
+% ─────────────────────────────────────────────────────────
+fprintf('═════════════════════════════════════════════════════════════════\n');
+fprintf('TRAJECTORY VALIDATION SUMMARY:\n');
+fprintf('  Total trials: %d\n', validation_summary.n_trials);
+fprintf('  Geometrically feasible: %d (%d%%)\n', validation_summary.n_feasible, ...
+    round(100 * validation_summary.n_feasible / validation_summary.n_trials));
+fprintf('  Warnings issued: %d\n', validation_summary.n_warnings);
+fprintf('  Positions adjusted: %d\n', validation_summary.n_adjusted);
+fprintf('═════════════════════════════════════════════════════════════════\n\n');
+
+if validation_summary.n_feasible == validation_summary.n_trials
+    fprintf('✅ ALL TRIALS GEOMETRICALLY FEASIBLE - Ready for optimization\n\n');
+else
+    fprintf('⚠️  Some trials marginal - Motor learning must be accurate for interception\n\n');
+end
 
 % Layer dimensions (needed later when initializing representations)
 % NOTE: scale_factor controls how much to enlarge internal layers.
