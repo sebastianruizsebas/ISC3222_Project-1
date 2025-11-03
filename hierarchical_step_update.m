@@ -86,14 +86,16 @@ S.z_ball(i+1) = max(workspace_bounds(3,1), min(workspace_bounds(3,2), S.z_ball(i
 
 % Identify current active task from L0 (one-hot encoding)
 [~, current_task_idx] = max(S.R_L0(i,:));
-if current_task_idx < 1 || current_task_idx > length(S.W_motor_L2_to_L1)
+if current_task_idx < 1 || current_task_idx > length(S.W_plan_L2_to_L1)
     current_task_idx = 1;  % safety fallback
 end
 
-% Get task-specific weight matrices for current task (feedforward only, no lateral)
-W_motor_L2_to_L1_active = S.W_motor_L2_to_L1{current_task_idx};
-W_motor_L3_to_L2_active = S.W_motor_L3_to_L2{current_task_idx};
+% Get weight matrices (motor: SHARED, planning: TASK-INDEXED)
+% Motor weights are single shared matrices (not cell arrays) for generalization
+W_motor_L2_to_L1_active = S.W_motor_L2_to_L1;  % Always use shared motor weights
+W_motor_L3_to_L2_active = S.W_motor_L3_to_L2;
 
+% Planning weights are task-indexed (cell arrays)
 W_plan_L2_to_L1_active = S.W_plan_L2_to_L1{current_task_idx};
 W_plan_L3_to_L2_active = S.W_plan_L3_to_L2{current_task_idx};
 
@@ -152,10 +154,19 @@ S.motor_vy_plan(i) = P.motor_gain * pred_vel_plan(2);
 S.motor_vz_plan(i) = P.motor_gain * pred_vel_plan(3);
 
 % FINAL MOTOR COMMAND: Use ONLY motor region predictions (pure predictive coding)
-% Planning learns ball dynamics (separate error signal), motor learns reaching dynamics
-final_motor_vx = S.motor_vx_motor(i);
-final_motor_vy = S.motor_vy_motor(i);
-final_motor_vz = S.motor_vz_motor(i);
+% FIX (Nov 3, 2025): ADD MOTOR EXPLORATION NOISE for stochasticity
+% RATIONALE: Without noise, execution = prediction → error = 0
+%           With noise: execution differs from prediction → learning signal exists
+%           Annealing: noise ↓ over time (less exploration, more exploitation)
+
+% Noise scale: start high, decay to zero over training
+noise_annealing_factor = max(0.01, 1.0 - (i / 1000));  % Decreases from 1.0 to 0.01 over ~1000 steps
+noise_scale = 0.05 * noise_annealing_factor;  % Max noise magnitude: 0.05 m/s * annealing factor
+
+% Add exploration noise to motor commands
+final_motor_vx = S.motor_vx_motor(i) + noise_scale * randn();
+final_motor_vy = S.motor_vy_motor(i) + noise_scale * randn();
+final_motor_vz = S.motor_vz_motor(i) + noise_scale * randn();
 
 % Integrate motor command into player dynamics (pure predictive execution)
 S.vx_player(i+1) = P.damping * S.vx_player(i) + final_motor_vx;
@@ -195,21 +206,19 @@ S.E_L2_plan(i,:) = S.R_L2_plan(i,:) - S.pred_L2_plan(i,:);
 S.interception_error_all(i) = sqrt((S.x_player(i+1) - S.x_ball(i+1))^2 + (S.y_player(i+1) - S.y_ball(i+1))^2 + (S.z_player(i+1) - S.z_ball(i+1))^2);
 
 % NEW: Compute cross-task error signals for diagnostics and optional interference penalty
-% Loop over all tasks and compute what error WOULD be if that task were active
-for task_candidate = 1:numel(S.W_motor_L2_to_L1)
-    % Predictions if task_candidate were active
-    W_motor_L2_to_L1_cand = S.W_motor_L2_to_L1{task_candidate};
-    pred_L1_motor_cand = S.R_L2_motor(i,:) * W_motor_L2_to_L1_cand';
-    
-    % L1 error for this candidate task
-    E_L1_motor_cand = [pos_vec - pred_L1_motor_cand(1:3)];
-    S.task_errors_motor(i, task_candidate) = norm(E_L1_motor_cand);
-    
-    % Planning error candidate
+% Motor: single shared weights, so no per-task error computation needed
+% Planning: task-indexed, so compute error for each task
+
+% Task-indexed planning error computation
+for task_candidate = 1:numel(S.W_plan_L2_to_L1)
+    % Planning error for this candidate task
     W_plan_L2_to_L1_cand = S.W_plan_L2_to_L1{task_candidate};
     pred_L1_plan_cand = S.R_L2_plan(i,:) * W_plan_L2_to_L1_cand';
-    E_L1_plan_cand = [pos_ball - pred_L1_plan_cand(1:3)];
+    E_L1_plan_cand = pos_ball(1:numel(idx_pos)) - pred_L1_plan_cand(idx_pos);
     S.task_errors_plan(i, task_candidate) = norm(E_L1_plan_cand);
+    
+    % Motor error is the same for all tasks (shared weights)
+    S.task_errors_motor(i, task_candidate) = S.interception_error_all(i);
 end
 
 % If player is sufficiently close to the ball, signal session end
@@ -274,7 +283,7 @@ end
 
 if interference_penalty_weight > 0
     % Penalize errors from non-active tasks (encourages task separation)
-    for task_idx = 1:numel(S.W_motor_L2_to_L1)
+    for task_idx = 1:numel(S.W_plan_L2_to_L1)
         if task_idx ~= current_task_idx
             % Clip cross-task errors to safe ranges
             motor_crosstask_error = max(0, min(max_finite_value, S.task_errors_motor(i, task_idx)));
@@ -527,87 +536,76 @@ S.R_L3_plan(i+1,:) = max(-1, min(1, S.R_L3_plan(i+1,:)));
 % Weight updates are driven by errors and represent genuine learning signal
 % Cross-task interference penalty encourages but doesn't enforce specialization
 
-layer_scale_motor_1 = max(0.1, mean(abs(S.R_L2_motor(i,:))));
-layer_scale_motor_3 = max(0.1, mean(abs(S.R_L3_motor(i,:))));
+% WEIGHT UPDATES: UPDATE ALL TASKS (WITH GRADIENT CLIPPING - FIX #2)
+% ====================================================================
+% NEW FIX: Stabilize gradient computation by:
+%   1. Replace mean(abs()) layer scaling with L2 norm (more stable)
+%   2. Add gradient clipping to prevent explosion
+%   3. Handle both motor (shared) and planning (task-indexed) weights
+% ====================================================================
 
-dW_motor_1 = -(P.eta_W * S.pi_L1_motor / layer_scale_motor_1) * (S.E_L1_motor(i,:)' * S.R_L2_motor(i,:));
-dW_motor_3 = -(P.eta_W * S.pi_L2_motor / layer_scale_motor_3) * (S.E_L2_motor(i,:)' * S.R_L3_motor(i,:));
+% --- MOTOR WEIGHT UPDATES (Shared - FIX: Use L2 norm for stability) ---
+% OLD (unstable): layer_scale = mean(abs(R_L2_motor))
+% NEW (stable): layer_scale = L2 norm with adaptive floor
+layer_norm_motor_2 = max(0.1, norm(S.R_L2_motor(i,:), 2));
+layer_norm_motor_3 = max(0.1, norm(S.R_L3_motor(i,:), 2));
 
-% Motor weights: UPDATE ALL TASKS on current data
-% THEORETICAL FIX #4 (Nov 2, 2025): Enable Interference Penalty to Drive Weight Specialization
-% BEFORE: All weights updated equally; interference penalty only logged to free energy
-%         Penalty had ZERO effect on weight learning (diagnostic only)
-%         Result: All tasks' weights learned identically (no specialization)
-% AFTER: Interference penalty modulates off-task learning rates
-%        Off-task weights updated with penalty gradient subtracted
-%        On-task weights learn normally; off-task weights learn less
-% RATIONALE: If on-task error = low, off-task error = high (good separation)
-%            Penalty drives off-task weights AWAY from current task's data
-%            Results in natural task specialization through weight competition
-%            More biologically plausible than explicit weight freezing
+% Compute gradients with normalized layer scales
+dW_motor_L2_to_L1 = -(P.eta_W * S.pi_L1_motor / layer_norm_motor_2) * (S.E_L1_motor(i,:)' * S.R_L2_motor(i,:));
+dW_motor_L3_to_L2 = -(P.eta_W * S.pi_L2_motor / layer_norm_motor_3) * (S.E_L2_motor(i,:)' * S.R_L3_motor(i,:));
 
-for task_idx = 1:numel(S.W_motor_L2_to_L1)
-    if task_idx == current_task_idx
-        % Active task: normal weight update (driven by on-task errors)
-        S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} + dW_motor_1;
-        S.W_motor_L3_to_L2{task_idx} = S.W_motor_L3_to_L2{task_idx} + dW_motor_3;
-    else
-        % Off-task: reduced learning scaled by interference penalty
-        % This drives off-task weights AWAY from current task's error signal
-        
-        if interference_penalty_weight > 0
-            % Compute cross-task error signals (if this off-task were active)
-            W_motor_L2_to_L1_off = S.W_motor_L2_to_L1{task_idx};
-            pred_L1_motor_off = S.R_L2_motor(i,:) * W_motor_L2_to_L1_off';
-            E_L1_motor_off = S.E_L1_motor(i,:) - pred_L1_motor_off;  % Difference from off-task prediction
-            
-            % Off-task penalty gradient (drives weights away from current data)
-            penalty_gradient_motor_1 = interference_penalty_weight * (E_L1_motor_off' * S.R_L2_motor(i,:));
-            
-            % Update with penalty opposition (reduces off-task learning on current task data)
-            S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} + dW_motor_1 - penalty_gradient_motor_1;
-            S.W_motor_L3_to_L2{task_idx} = S.W_motor_L3_to_L2{task_idx} + dW_motor_3;
-        else
-            % No interference penalty: all tasks learn equally (may cause interference)
-            S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} + dW_motor_1;
-            S.W_motor_L3_to_L2{task_idx} = S.W_motor_L3_to_L2{task_idx} + dW_motor_3;
-        end
-    end
-end
+% FIX (Nov 3, 2025): Add gradient clipping to prevent explosion
+% If gradient magnitude exceeds threshold, clip it to [-max_grad, +max_grad]
+max_motor_grad = 0.1;  % Clip motor gradients to [-0.1, +0.1]
+dW_motor_L2_to_L1 = max(-max_motor_grad, min(max_motor_grad, dW_motor_L2_to_L1));
+dW_motor_L3_to_L2 = max(-max_motor_grad, min(max_motor_grad, dW_motor_L3_to_L2));
 
-% Planning weight updates (ALL TASKS)
-layer_scale_plan_1 = max(0.1, mean(abs(S.R_L2_plan(i,:))));
-layer_scale_plan_3 = max(0.1, mean(abs(S.R_L3_plan(i,:))));
+% Motor weights: UPDATE SHARED (not task-indexed)
+% All tasks use the same motor weights, so weight updates apply to all tasks simultaneously
+% This enforces learning of generalizable velocity control
+S.W_motor_L2_to_L1 = S.W_motor_L2_to_L1 + dW_motor_L2_to_L1;
+S.W_motor_L3_to_L2 = S.W_motor_L3_to_L2 + dW_motor_L3_to_L2;
 
-dW_plan_1 = -(P.eta_W * S.pi_L1_plan / layer_scale_plan_1) * (S.E_L1_plan(i,:)' * S.R_L2_plan(i,:));
-dW_plan_3 = -(P.eta_W * S.pi_L2_plan / layer_scale_plan_3) * (S.E_L2_plan(i,:)' * S.R_L3_plan(i,:));
+% --- PLANNING WEIGHT UPDATES (Task-indexed - FIX: Use L2 norm for stability) ---
+layer_norm_plan_2 = max(0.1, norm(S.R_L2_plan(i,:), 2));
+layer_norm_plan_3 = max(0.1, norm(S.R_L3_plan(i,:), 2));
 
-% Planning weights: UPDATE ALL TASKS on current data
-% Apply same interference penalty logic as motor weights
+dW_plan_L2_to_L1 = -(P.eta_W * S.pi_L1_plan / layer_norm_plan_2) * (S.E_L1_plan(i,:)' * S.R_L2_plan(i,:));
+dW_plan_L3_to_L2 = -(P.eta_W * S.pi_L2_plan / layer_norm_plan_3) * (S.E_L2_plan(i,:)' * S.R_L3_plan(i,:));
+
+% Clip planning gradients
+max_plan_grad = 0.1;  % Clip planning gradients to [-0.1, +0.1]
+dW_plan_L2_to_L1 = max(-max_plan_grad, min(max_plan_grad, dW_plan_L2_to_L1));
+dW_plan_L3_to_L2 = max(-max_plan_grad, min(max_plan_grad, dW_plan_L3_to_L2));
+
+% Planning weights: UPDATE ALL TASKS
+% Apply same logic as before: active task learns normally, off-task learns with interference penalty
 for task_idx = 1:numel(S.W_plan_L2_to_L1)
     if task_idx == current_task_idx
         % Active task: normal update
-        S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_1;
-        S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_3;
+        S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_L2_to_L1;
+        S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_L3_to_L2;
     else
-        % Off-task: apply interference penalty gradient
-        if interference_penalty_weight > 0
+        % Off-task: apply interference penalty gradient (if enabled)
+        if P.interference_penalty_weight > 0
             W_plan_L2_to_L1_off = S.W_plan_L2_to_L1{task_idx};
             pred_L1_plan_off = S.R_L2_plan(i,:) * W_plan_L2_to_L1_off';
             E_L1_plan_off = S.E_L1_plan(i,:) - pred_L1_plan_off;
             
-            penalty_gradient_plan_1 = interference_penalty_weight * (E_L1_plan_off' * S.R_L2_plan(i,:));
+            penalty_gradient_plan_L2 = P.interference_penalty_weight * (E_L1_plan_off' * S.R_L2_plan(i,:));
             
-            S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_1 - penalty_gradient_plan_1;
-            S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_3;
+            S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_L2_to_L1 - penalty_gradient_plan_L2;
+            S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_L3_to_L2;
         else
-            S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_1;
-            S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_3;
+            % No interference penalty: all tasks learn equally
+            S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} + dW_plan_L2_to_L1;
+            S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} + dW_plan_L3_to_L2;
         end
     end
 end
 
-S.learning_trace_W(i) = norm(dW_motor_1, 'fro') + norm(dW_motor_3, 'fro') + norm(dW_plan_1, 'fro') + norm(dW_plan_3, 'fro');
+% Track learning trace (norm of weight updates)
+S.learning_trace_W(i) = norm([dW_motor_L2_to_L1(:); dW_motor_L3_to_L2(:); dW_plan_L2_to_L1(:); dW_plan_L3_to_L2(:)], 2);
 
 % ------------------------------
 % DYNAMIC PRECISION UPDATES
@@ -905,20 +903,21 @@ S.pi_trace_L2_plan(i) = S.pi_L2_plan; S.pi_raw_trace_L2_plan(i) = raw4; S.denom_
 max_weight_norm_motor = 2.0;     % Prevent M1 weights from growing unbounded
 max_weight_norm_plan = 2.0;      % Prevent prefrontal weights from growing unbounded
 
-% Apply max-norm constraint to all task-indexed weight matrices
-for task_idx = 1:numel(S.W_motor_L2_to_L1)
-    % Motor L2->L1 weights
-    w_norm = norm(S.W_motor_L2_to_L1{task_idx}, 'fro');
-    if w_norm > max_weight_norm_motor
-        S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} * (max_weight_norm_motor / w_norm);
-    end
-    
-    % Motor L3->L2 weights
-    w_norm = norm(S.W_motor_L3_to_L2{task_idx}, 'fro');
-    if w_norm > max_weight_norm_motor
-        S.W_motor_L3_to_L2{task_idx} = S.W_motor_L3_to_L2{task_idx} * (max_weight_norm_motor / w_norm);
-    end
-    
+% Apply max-norm constraint to MOTOR SHARED weights (not task-indexed)
+% Motor L2->L1 weights (SHARED across all tasks)
+w_norm = norm(S.W_motor_L2_to_L1, 'fro');
+if w_norm > max_weight_norm_motor
+    S.W_motor_L2_to_L1 = S.W_motor_L2_to_L1 * (max_weight_norm_motor / w_norm);
+end
+
+% Motor L3->L2 weights (SHARED across all tasks)
+w_norm = norm(S.W_motor_L3_to_L2, 'fro');
+if w_norm > max_weight_norm_motor
+    S.W_motor_L3_to_L2 = S.W_motor_L3_to_L2 * (max_weight_norm_motor / w_norm);
+end
+
+% Apply max-norm constraint to PLANNING TASK-INDEXED weights
+for task_idx = 1:numel(S.W_plan_L2_to_L1)
     % Planning L2->L1 weights
     w_norm = norm(S.W_plan_L2_to_L1{task_idx}, 'fro');
     if w_norm > max_weight_norm_plan
@@ -934,7 +933,7 @@ end
 
 % DIAGNOSTIC: Track how often max-norm is active (should be rare in stable learning)
 if ~isfield(S, 'maxnorm_events'), S.maxnorm_events = 0; end
-if any([norm(S.W_motor_L2_to_L1{1},'fro'), norm(S.W_motor_L3_to_L2{1},'fro'), ...
+if any([norm(S.W_motor_L2_to_L1,'fro'), norm(S.W_motor_L3_to_L2,'fro'), ...
         norm(S.W_plan_L2_to_L1{1},'fro'), norm(S.W_plan_L3_to_L2{1},'fro')] > max_weight_norm_motor*0.95)
     S.maxnorm_events = S.maxnorm_events + 1;
 end

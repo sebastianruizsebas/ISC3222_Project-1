@@ -658,47 +658,57 @@ fprintf('  Expected: Motor learns velocity control; Planning learns target motio
 % NEW: Maintain separate weight matrices per task to prevent interference learning.
 % Each task gets its own learned mappings, reducing catastrophic forgetting.
 
-% Motor region weights: task-indexed (one copy per trial)
-% PURE FEEDFORWARD STRUCTURE (lateral weights removed Nov 2, 2025)
-W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);  % NOT cell array
+% ====================================================================
+% MOTOR WEIGHTS: SHARED (GENERALIZE ACROSS TASKS)
+% ====================================================================
+% Motor region learns stable forward model of velocity dynamics
+% SINGLE shared copy for all tasks (not task-indexed)
+% This enforces generalization: reaching control should work across all tasks
+% Task selectivity emerges from planning layer (which IS task-indexed)
+% ====================================================================
+
+W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);
 W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
 
-% Planning region weights: TASK-INDEXED (learn task-specific interception strategies)
+% --- Motor L2->L1 mappings (basis to proprioception) ---
+% Map L2_motor velocity-like features into L1 velocity rows.
+map_vel = min(n_vel, n_L2_motor);
+W_motor_L2_to_L1(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
+
+% Weak position coupling from same L2 channels (if available)
+map_pos = min(n_pos, n_L2_motor);
+W_motor_L2_to_L1(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
+
+% Bias / offset row -- small random init
+W_motor_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
+
+% --- Motor L3->L2 mappings (output to basis) ---
+% Initialize L3->L2 mapping with structured identity on the overlapping block
+map_block = min(n_L2_motor, n_L3_motor);
+fan_in3 = max(1, n_L3_motor);
+W_motor_L3_to_L2(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
+% remaining rows (if any) get small random init scaled by fan-in
+if n_L2_motor > map_block
+    W_motor_L3_to_L2(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
+end
+
+% ====================================================================
+% PLANNING WEIGHTS: TASK-INDEXED (SPECIALIZE ACROSS TASKS)
+% ====================================================================
+% Planning region learns task-specific interception strategies
+% CELL ARRAY: one copy per task (learns different ball dynamics for each trial)
+% ====================================================================
+
 W_plan_L2_to_L1 = cell(n_trials, 1);   % task-specific policy->goal
 W_plan_L3_to_L2 = cell(n_trials, 1);   % task-specific output->policy
 
-% Initialize per-task weight matrices
+% Initialize per-task planning weight matrices
 for task_idx = 1:n_trials
-    % --- Motor L2->L1 mappings (basis to proprioception) ---
-    
-    % Map L3_motor (velocity-like outputs) into L1 velocity rows.
-    map_vel = min(n_vel, n_L3_motor);
-    W_motor_L2_to_L1(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
-    
-    % Weak position coupling from same L3 channels (if available)
-    map_pos = min(n_pos, n_L3_motor);
-    W_motor_L2_to_L1(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
-    
-    % Bias / offset row -- small random init
-    W_motor_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
-    
-    % --- Motor L3->L2 mappings (output to basis) ---
-    W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
-    
-    % Initialize L3->L2 mapping with structured identity on the overlapping block
-    map_block = min(n_L2_motor, n_L3_motor);
-    fan_in3 = max(1, n_L3_motor);
-    W_motor_L3_to_L2(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
-    % remaining rows (if any) get small random init scaled by fan-in
-    if n_L2_motor > map_block
-        W_motor_L3_to_L2(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
-    end
-    
     % --- Planning L2->L1 mappings (policy to goal) ---
     W_plan_L2_to_L1{task_idx} = zeros(n_L1_plan, n_L2_plan);
     
-    map_vel_p = min(n_vel, n_L3_plan);
-    map_pos_p = min(n_pos, n_L3_plan);
+    map_vel_p = min(n_vel, n_L2_plan);
+    map_pos_p = min(n_pos, n_L2_plan);
     W_plan_L2_to_L1{task_idx}(idx_pos(1:map_pos_p), 1:map_pos_p) = 0.01 * eye(map_pos_p);
     W_plan_L2_to_L1{task_idx}(idx_vel(1:map_vel_p), 1:map_vel_p) = 0.1 * eye(map_vel_p);
     W_plan_L2_to_L1{task_idx}(idx_bias, :) = 0.01 * randn(1, n_L2_plan);
@@ -714,14 +724,15 @@ for task_idx = 1:n_trials
     end
 end
 
-
-fprintf('WEIGHT MATRICES INITIALIZED (TASK-INDEXED):\n');
-fprintf('  Motor Region: %d separate task copies\n', n_trials);
-fprintf('    W_motor_L2_to_L1{task}: Motor Basis → Proprioception (%dx%d each)\n', n_L1_motor, n_L2_motor);
-fprintf('    W_motor_L3_to_L2{task}: Output → Basis (%dx%d each)\n', n_L2_motor, n_L3_motor);
-fprintf('  Planning Region: %d separate task copies\n', n_trials);
-fprintf('    W_plan_L2_to_L1{task}: Policies → Goal State (%dx%d each)\n', n_L1_plan, n_L2_plan);
-fprintf('    W_plan_L3_to_L2{task}: Output → Policies (%dx%d each)\n\n', n_L2_plan, n_L3_plan);
+fprintf('WEIGHT MATRICES INITIALIZED:\n');
+fprintf('  ✓ Motor Region: SHARED across all tasks (generalization)\n');
+fprintf('      W_motor_L2_to_L1: Motor Basis → Proprioception (%dx%d)\n', n_L1_motor, n_L2_motor);
+fprintf('      W_motor_L3_to_L2: Output → Basis (%dx%d)\n', n_L2_motor, n_L3_motor);
+fprintf('      → Single shared copy: learns stable forward model\n');
+fprintf('  ✓ Planning Region: TASK-INDEXED (%d task-specific copies)\n', n_trials);
+fprintf('      W_plan_L2_to_L1{task}: Policies → Goal State (%dx%d each)\n', n_L1_plan, n_L2_plan);
+fprintf('      W_plan_L3_to_L2{task}: Output → Policies (%dx%d each)\n', n_L2_plan, n_L3_plan);
+fprintf('      → Separate copies: learn task-specific interception strategies\n\n');
 
 % ====================================================================
 % ERROR AND LEARNING TRACKING
@@ -1009,7 +1020,11 @@ for trial = 1:n_trials
 end
 
 for i = 1:N-1
-    if mod(i, 100) == 0, fprintf('.'); end
+    % FIX (Nov 3, 2025): Add diagnostic output every 100 steps
+    % Tracks: free energy, interception error, weight update magnitude, precision values
+    % Use this to debug whether learning is actually happening
+    print_diagnostics = (mod(i, 100) == 0);
+    if print_diagnostics, fprintf('.'); end
     
     % ==============================================================
     % CHECK FOR TRIAL TRANSITION
@@ -1065,13 +1080,10 @@ for i = 1:N-1
                 S.R_L3_plan(i, 1:3) = target_vel / (norm(target_vel) + 1e-6);
                 
                 % Apply phase transition decay - differential for motor vs. planning
-                % Weight matrices are stored as cell arrays (one per task). Apply
-                % decay to each task-specific matrix so we don't attempt numeric
-                % ops on cell containers.
-                for tt = 1:numel(S.W_motor_L2_to_L1)
-                    S.W_motor_L2_to_L1{tt} = decay_motor * S.W_motor_L2_to_L1{tt};
-                    S.W_motor_L3_to_L2{tt} = decay_motor * S.W_motor_L3_to_L2{tt};
-                end
+                % Motor weights are SHARED (single copy for generalization)
+                % Planning weights are TASK-INDEXED (one copy per task)
+                S.W_motor_L2_to_L1 = decay_motor * S.W_motor_L2_to_L1;
+                S.W_motor_L3_to_L2 = decay_motor * S.W_motor_L3_to_L2;
 
                 for tt = 1:numel(S.W_plan_L2_to_L1)
                     S.W_plan_L2_to_L1{tt} = decay_plan * S.W_plan_L2_to_L1{tt};
@@ -1079,8 +1091,8 @@ for i = 1:N-1
                 end
 
                 % Restore critical motor mappings (use semantic idx_vel for robustness)
-                % Write this into the current trial's motor mapping so the active
-                % task retains the basic velocity-to-output mapping.
+                % Write this into the SHARED motor mapping so all tasks retain
+                % the basic velocity-to-output mapping.
                 map_vel_idx = idx_vel(1:min(3, numel(idx_vel)));
                 S.W_motor_L2_to_L1(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
 
@@ -1123,6 +1135,18 @@ for i = 1:N-1
     
     % Delegate predictive coding + update work to the helper (type-stable, JIT-friendly)
     S = hierarchical_step_update(i, S, P);
+
+    % FIX (Nov 3, 2025): PRINT LEARNING DIAGNOSTICS
+    % These values help you debug whether learning is happening
+    if print_diagnostics
+        fprintf('\n  Step %d: FE=%.2e | IntErr=%.4f | |dW|=%.2e | pi_L1m=%.1f | noise_scale=%.4f\n', ...
+            i, ...
+            S.free_energy_all(i), ...
+            S.interception_error_all(i), ...
+            S.learning_trace_W(i), ...
+            S.pi_L1_motor, ...
+            max(0.01, 0.05 * (1.0 - i/1000)));  % Current noise level
+    end
 
     % --- NEW: Early termination if too many clipping events occurred ---
     if isfield(S, 'clipping_count') && S.clipping_count > P.max_clipping_events
