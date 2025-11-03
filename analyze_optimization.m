@@ -65,10 +65,12 @@ fprintf('  Total evaluations (est): %s\n\n', mat2str(total_evals));
 % ====================================================================
 fprintf('Extracting top-200 best parameter sets...\n');
 % If a pre-built leader_list was loaded from the .mat file, use it directly.
+% Use top-N = 110 by default (clamped to available entries)
+TOP_N_DESIRED = 110;
 if exist('leader_list', 'var') && ~isempty(leader_list)
-    fprintf('Using pre-saved leader_list with %d entries\n', length(leader_list));
-    % Ensure top_n reflects available entries
-    top_n = length(leader_list);
+    fprintf('Using pre-saved leader_list with %d entries (using top %d)\n', length(leader_list), TOP_N_DESIRED);
+    % Ensure top_n reflects available entries but cap to desired top-N
+    top_n = min(TOP_N_DESIRED, length(leader_list));
 else
     % Build leader_list from legacy results.particles
     if ~exist('results', 'var') || ~isfield(results, 'particles')
@@ -92,8 +94,8 @@ else
     num_valid = sum(valid_mask);
     fprintf('  Valid (finite) scores: %d / %d\n', num_valid, num_particles);
 
-    % Take top 20 valid scores (legacy behavior)
-    top_n = min(20, num_valid);
+    % Take top-N valid scores (legacy behavior) - prefer TOP_N_DESIRED
+    top_n = min(TOP_N_DESIRED, num_valid);
     fprintf('  Building top-%d leaderboard...\n\n', top_n);
 
     % Build leader_list structure
@@ -156,10 +158,10 @@ else
 end
 
 % ====================================================================
-% Display Top-20 Leaderboard
+% Display Top-N Leaderboard
 % ====================================================================
 fprintf('═══════════════════════════════════════════════════════════════\n');
-fprintf('TOP 20 PARAMETER SETS\n');
+fprintf('TOP %d PARAMETER SETS\n', top_n);
 fprintf('═══════════════════════════════════════════════════════════════\n\n');
 
 fprintf('Rank │   Score   │ Particle │ eta_rep  │ eta_W    │ momentum\n');
@@ -187,16 +189,16 @@ end
 fprintf('\n');
 
 % ====================================================================
-% Save Top-20 to pso_top20_best_params.mat
+% Save Top-N leaderboard to figures (named with top-N)
 % ====================================================================
-fprintf('Saving top-20 leaderboard...\n');
+fprintf('Saving top-%d leaderboard...\n', top_n);
 
 out_dir = './figures';
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
-save_path = fullfile(out_dir, 'pso_top20_best_params.mat');
-save(save_path, 'leader_list');
-fprintf('✓ Top-20 saved to: %s\n\n', save_path);
+save_path = fullfile(out_dir, sprintf('pso_top%d_best_params.mat', top_n));
+save(save_path, 'leader_list', 'param_stats');
+fprintf('✓ Top-%d saved to: %s\n\n', top_n, save_path);
 
 % ====================================================================
 % Save best_params for quick access

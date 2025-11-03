@@ -50,74 +50,74 @@ noise_scale = 0.1;  % Noise scale for stochastic perturbations (10% of parameter
 param_bounds = struct();
 
 % LEARNING RATES (log scale)
-param_bounds.eta_rep.log_min = -5;      % 10^-5 = 0.00001
-param_bounds.eta_rep.log_max = -3;      % 10^-3 = 0.001
+param_bounds.eta_rep.log_min = -5;      % 10^-(5.5) = 0.000001
+param_bounds.eta_rep.log_max = -4;      % 10^-4 = 0.0001
 param_bounds.eta_W.log_min = -7;        % 10^-7 = 0.0000001
 param_bounds.eta_W.log_max = -5;        % 10^-5 = 0.00001
 param_bounds.momentum.min = 0.70;       % Linear scale
-param_bounds.momentum.max = 0.95;
+param_bounds.momentum.max = 0.86;
 
-% WEIGHT DECAY (linear scale, affects learning across trials)
-param_bounds.weight_decay.min = 0.60;
-param_bounds.weight_decay.max = 0.999;
+% WEIGHT DECAY (NEW - Nov 2, 2025) (linear scale, affects learning across trials)
+param_bounds.weight_decay.min = 0.650;
+param_bounds.weight_decay.max = 0.800;
 
-% TASK-CONDITIONAL DECAY RATES (NEW - Nov 1, 2025)
+% TASK-CONDITIONAL DECAY RATES (NEW - Nov 2, 2025)
 % Motor region: preserve stable dynamics across tasks (high retention)
-param_bounds.decay_motor.min = 0.90;    % Motor: 90-99% weight retention
-param_bounds.decay_motor.max = 0.99;
-% Planning region: forget old task-specific targets (lower retention)
-param_bounds.decay_plan.min = 0.50;     % Planning: 50-80% weight retention
-param_bounds.decay_plan.max = 0.85;
+param_bounds.decay_motor.min = 0.880;    % Motor: 90-99% weight retention
+param_bounds.decay_motor.max = 0.940;
+% Planning region: forget old task-specific targets (NEW - Nov 2, 2025) (lower retention)
+param_bounds.decay_plan.min = 0.20;     % Planning: 50-80% weight retention
+param_bounds.decay_plan.max = 0.68;
 
-% MOTOR DYNAMICS (linear scale, affects trajectory quality)
+% MOTOR DYNAMICS (NEW - Nov 2, 2025) (linear scale, affects trajectory quality)
 param_bounds.motor_gain.min = 0.25;      % Initial motor command strength
-param_bounds.motor_gain.max = 1.0;
-param_bounds.damping.min = 0.30;        % Velocity dampening
-param_bounds.damping.max = 0.759;
-param_bounds.reaching_speed_scale.min = 0.1;  % Target reaching speed scaling
-param_bounds.reaching_speed_scale.max = 2.0;
+param_bounds.motor_gain.max = 1.1;
+param_bounds.damping.min = 0.53;        % Velocity dampening
+param_bounds.damping.max = 0.92;
+param_bounds.reaching_speed_scale.min = 0.20;  % Target reaching speed scaling
+param_bounds.reaching_speed_scale.max = 1.35;
 
-% WEIGHT INITIALIZATION GAINS (linear scale, affects convergence)
+% WEIGHT INITIALIZATION GAINS (NEW - Nov 2, 2025) (linear scale, affects convergence)
 param_bounds.W_motor_gain.min = 0.1;   % Motor weight init gain
-param_bounds.W_motor_gain.max = 1.0;
-param_bounds.W_plan_gain.min = 0.01;    % Planning weight init gain
-param_bounds.W_plan_gain.max = 0.70;
+param_bounds.W_motor_gain.max = 0.75;
+param_bounds.W_plan_gain.min = 0.35;    % Planning weight init gain
+param_bounds.W_plan_gain.max = 0.95;
 
-% TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 1, 2025)
+% TASK-CONDITIONAL LEARNING PARAMETERS (NEW - Nov 2, 2025)
 % Interference penalty: encourages task-specific weight specialization
 param_bounds.interference_penalty_weight.min = 0.0;   % No penalty
-param_bounds.interference_penalty_weight.max = 0.1;   % Max cross-task error penalty
+param_bounds.interference_penalty_weight.max = 0.05;   % Max cross-task error penalty
 
 % ADAPTIVE PRECISION PARAMETERS (NEW - Nov 2, 2025)
 % Prediction-error-driven precision: precision = precision_old * exp(alpha * error)
 % Higher sensitivity (alpha) → precision responds more aggressively to errors
-param_bounds.alpha_precision_gain.min = 0.5;      % Low sensitivity (smooth adaptation)
+param_bounds.alpha_precision_gain.min = 1.1;      % Low sensitivity (smooth adaptation)
 param_bounds.alpha_precision_gain.max = 2.0;      % High sensitivity (sharp adaptation)
 
 % Precision bounds for L1 motor (proprioceptive / sensory level)
 % High precision = tighter constraints on proprioceptive predictions
 % NOTE: min values are hard-coded in main script (10, 1, 10, 1), only max values are optimized
-param_bounds.pi_L1_motor_max.min = 150;           % Minimum upper bound
-param_bounds.pi_L1_motor_max.max = 400;          % Maximum upper bound
+param_bounds.pi_L1_motor_max.min = 250;           % Minimum upper bound
+param_bounds.pi_L1_motor_max.max = 500;          % Maximum upper bound
 
 % Precision bounds for L2 motor (intermediate basis functions)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L2_motor_max.min = 30;
+param_bounds.pi_L2_motor_max.min = 65;
 param_bounds.pi_L2_motor_max.max = 200;
 
 % Precision bounds for L1 plan (goal/target representation)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L1_plan_max.min = 80;
-param_bounds.pi_L1_plan_max.max = 450;
+param_bounds.pi_L1_plan_max.min = 50;
+param_bounds.pi_L1_plan_max.max = 320;
 
 % Precision bounds for L2 plan (planning policies)
 % NOTE: min values are hard-coded in main script, only max values are optimized
-param_bounds.pi_L2_plan_max.min = 20;
-param_bounds.pi_L2_plan_max.max = 150;
+param_bounds.pi_L2_plan_max.min = 10;
+param_bounds.pi_L2_plan_max.max = 60;
 
 % Objective function weights
 % For 3D reaching, primary metric is reaching distance improvement
-objective_weights = struct('reaching_distance', 1.0, 'position_rmse', 0.5);
+objective_weights = struct('reaching_distance', 1.2, 'position_rmse', 1.1);
 
 fprintf('LEARNING RATES:\n');
 fprintf('  eta_rep:  [%.6f, %.6f]\n', ...
