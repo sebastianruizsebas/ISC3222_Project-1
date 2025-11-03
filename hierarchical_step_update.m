@@ -886,4 +886,56 @@ S.pi_trace_L2_plan(i) = S.pi_L2_plan; S.pi_raw_trace_L2_plan(i) = raw4; S.denom_
 % Update state fields changed locally (weights already updated into S.W_* cells above)
 % No explicit copy needed since we modified S.W_* cells directly
 % Return updated S
+
+% =====================================================================
+% FIX #2: MAX-NORM WEIGHT CONSTRAINT (Prevents Explosion)
+% =====================================================================
+% BIOLOGICAL: Synaptic weights bounded by physical/chemical limits
+%             Receptors saturate; vesicle pools deplete
+% COMPUTATIONAL: Prevents numerical instability; improves generalization
+% MECHANISM: If weight vector norm exceeds max_weight_norm,
+%            scale entire weight vector down proportionally
+%
+% Formula:  if ||w|| > max_norm:
+%             w_new = w * (max_norm / ||w||)
+%           else:
+%             w_new = w (unchanged)
+
+% Set maximum weight norm (can be PSO parameter)
+max_weight_norm_motor = 2.0;     % Prevent M1 weights from growing unbounded
+max_weight_norm_plan = 2.0;      % Prevent prefrontal weights from growing unbounded
+
+% Apply max-norm constraint to all task-indexed weight matrices
+for task_idx = 1:numel(S.W_motor_L2_to_L1)
+    % Motor L2->L1 weights
+    w_norm = norm(S.W_motor_L2_to_L1{task_idx}, 'fro');
+    if w_norm > max_weight_norm_motor
+        S.W_motor_L2_to_L1{task_idx} = S.W_motor_L2_to_L1{task_idx} * (max_weight_norm_motor / w_norm);
+    end
+    
+    % Motor L3->L2 weights
+    w_norm = norm(S.W_motor_L3_to_L2{task_idx}, 'fro');
+    if w_norm > max_weight_norm_motor
+        S.W_motor_L3_to_L2{task_idx} = S.W_motor_L3_to_L2{task_idx} * (max_weight_norm_motor / w_norm);
+    end
+    
+    % Planning L2->L1 weights
+    w_norm = norm(S.W_plan_L2_to_L1{task_idx}, 'fro');
+    if w_norm > max_weight_norm_plan
+        S.W_plan_L2_to_L1{task_idx} = S.W_plan_L2_to_L1{task_idx} * (max_weight_norm_plan / w_norm);
+    end
+    
+    % Planning L3->L2 weights
+    w_norm = norm(S.W_plan_L3_to_L2{task_idx}, 'fro');
+    if w_norm > max_weight_norm_plan
+        S.W_plan_L3_to_L2{task_idx} = S.W_plan_L3_to_L2{task_idx} * (max_weight_norm_plan / w_norm);
+    end
+end
+
+% DIAGNOSTIC: Track how often max-norm is active (should be rare in stable learning)
+if ~isfield(S, 'maxnorm_events'), S.maxnorm_events = 0; end
+if any([norm(S.W_motor_L2_to_L1{1},'fro'), norm(S.W_motor_L3_to_L2{1},'fro'), ...
+        norm(S.W_plan_L2_to_L1{1},'fro'), norm(S.W_plan_L3_to_L2{1},'fro')] > max_weight_norm_motor*0.95)
+    S.maxnorm_events = S.maxnorm_events + 1;
+end
 end

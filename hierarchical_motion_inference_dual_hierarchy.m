@@ -254,19 +254,64 @@ for trial = 1:n_trials
     end
     
     % ─────────────────────────────────────────────────────────
-    % TEST 2: INTERCEPTION FEASIBILITY
+    % TEST 2: INTERCEPTION FEASIBILITY (MOVING TARGET)
     % ─────────────────────────────────────────────────────────
     % Can the player catch the target within the trial?
-    % Assumes: player can move at max_speed toward target
+    % For MOVING targets: uses relative motion analysis
+    % 
+    % Key insight: In relative coordinates (target frame),
+    % player must close distance at relative_closing_speed
+    % 
+    % Simplified model: assumes optimal pursuit (always moving directly at target)
+    % More rigorous: player can only move at max_speed, must predict target motion
     
     interception_feasible = false;
     time_to_intercept_min = Inf;
     
-    if target_speed < player_max_speed || sep < player_max_speed * T_per_trial
-        % Feasible if: target slower than player OR
-        %              initial gap closable within trial time
-        interception_feasible = true;
+    % ─ RELATIVE MOTION ANALYSIS ─
+    % Player velocity vector (optimal): magnitude = player_max_speed, direction = toward target
+    % Target velocity vector: already known as target_vel
+    % Relative velocity (player relative to target): v_rel = v_player - v_target
+    % 
+    % In best case (player always moves optimally toward current target position),
+    % closing speed = player_max_speed (because player can move at max speed toward target)
+    % 
+    % However, if target is moving AWAY, effective closing speed reduces:
+    % closing_speed_effective = max(player_max_speed - target_speed, 0.01)
+    % 
+    % For moving targets, must also account for target heading:
+    % - If target moves toward player: closing faster → easier interception
+    % - If target moves away from player: closing slower → harder interception
+    
+    % Conservative estimate: use component of target velocity moving away from player
+    % direction_to_target = (target_pos - player_pos) / separation
+    direction_to_target = (target_start - player_pos) / (sep + 1e-6);
+    target_speed_away = max(0, dot(target_vel, direction_to_target));  % Component moving away
+    
+    % More accurate closing speed accounting for target heading
+    closing_speed_accurate = player_max_speed - target_speed_away;
+    
+    % Interception is feasible if:
+    % 1. Player is faster than target (can always catch up), OR
+    % 2. Closing speed > 0 AND gap can be closed before end of trial
+    if closing_speed_accurate > 0.01  % Small threshold to avoid division by near-zero
+        time_to_intercept_min = sep / (closing_speed_accurate + 1e-6);
+        if time_to_intercept_min <= T_per_trial
+            interception_feasible = true;
+        end
+    elseif target_speed < player_max_speed && target_speed > 0
+        % Even if target heading is unfortunate, if player is faster overall, can catch
         time_to_intercept_min = sep / (player_max_speed - target_speed + 1e-6);
+        if time_to_intercept_min <= T_per_trial
+            interception_feasible = true;
+        end
+    end
+    
+    % Sanity check: if gap is small enough that player can cover it in trial time
+    distance_coverable = player_max_speed * T_per_trial;
+    if sep < distance_coverable && ~interception_feasible
+        interception_feasible = true;  % Can cover initial gap even if relative motion awkward
+        time_to_intercept_min = sep / player_max_speed;
     end
     
     % ─────────────────────────────────────────────────────────
@@ -615,40 +660,38 @@ fprintf('  Expected: Motor learns velocity control; Planning learns target motio
 
 % Motor region weights: task-indexed (one copy per trial)
 % PURE FEEDFORWARD STRUCTURE (lateral weights removed Nov 2, 2025)
-W_motor_L2_to_L1 = cell(n_trials, 1);  % task-specific motor basis->proprioception
-W_motor_L3_to_L2 = cell(n_trials, 1);  % task-specific output->motor basis
+W_motor_L2_to_L1 = zeros(n_L1_motor, n_L2_motor);  % NOT cell array
+W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
 
-% Planning region weights: task-indexed
-% PURE FEEDFORWARD STRUCTURE (lateral weights removed Nov 2, 2025)
+% Planning region weights: TASK-INDEXED (learn task-specific interception strategies)
 W_plan_L2_to_L1 = cell(n_trials, 1);   % task-specific policy->goal
 W_plan_L3_to_L2 = cell(n_trials, 1);   % task-specific output->policy
 
 % Initialize per-task weight matrices
 for task_idx = 1:n_trials
     % --- Motor L2->L1 mappings (basis to proprioception) ---
-    W_motor_L2_to_L1{task_idx} = zeros(n_L1_motor, n_L2_motor);
     
     % Map L3_motor (velocity-like outputs) into L1 velocity rows.
     map_vel = min(n_vel, n_L3_motor);
-    W_motor_L2_to_L1{task_idx}(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
+    W_motor_L2_to_L1(idx_vel(1:map_vel), 1:map_vel) = eye(map_vel);
     
     % Weak position coupling from same L3 channels (if available)
     map_pos = min(n_pos, n_L3_motor);
-    W_motor_L2_to_L1{task_idx}(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
+    W_motor_L2_to_L1(idx_pos(1:map_pos), 1:map_pos) = 0.01 * eye(map_pos);
     
     % Bias / offset row -- small random init
-    W_motor_L2_to_L1{task_idx}(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
+    W_motor_L2_to_L1(idx_bias, :) = 0.01 * randn(1, n_L2_motor);
     
     % --- Motor L3->L2 mappings (output to basis) ---
-    W_motor_L3_to_L2{task_idx} = zeros(n_L2_motor, n_L3_motor);
+    W_motor_L3_to_L2 = zeros(n_L2_motor, n_L3_motor);
     
     % Initialize L3->L2 mapping with structured identity on the overlapping block
     map_block = min(n_L2_motor, n_L3_motor);
     fan_in3 = max(1, n_L3_motor);
-    W_motor_L3_to_L2{task_idx}(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
+    W_motor_L3_to_L2(1:map_block, 1:map_block) = W_motor_gain * eye(map_block);
     % remaining rows (if any) get small random init scaled by fan-in
     if n_L2_motor > map_block
-        W_motor_L3_to_L2{task_idx}(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
+        W_motor_L3_to_L2(map_block+1:end, 1:n_L3_motor) = (W_motor_gain / sqrt(fan_in3)) * 0.01 * randn(n_L2_motor-map_block, n_L3_motor);
     end
     
     % --- Planning L2->L1 mappings (policy to goal) ---
@@ -924,6 +967,47 @@ else
     P.ground_z = workspace_bounds(3,1);
 end
 
+% =====================================================================
+% FIX #3: ADAPTIVE LEARNING RATE SCHEDULE (Curriculum Learning)
+% =====================================================================
+% THEORY: Learning rates should decrease over time (Robbins-Monro conditions)
+%         to ensure convergence and prevent overfitting
+% NEUROSCIENCE: Motor learning exhibits well-known learning curve decay
+%               Fast early learning → slow consolidation → plateau
+% MECHANISM: Every N trials, decay learning rates by factor
+%            eta_new = eta_old * decay_schedule_factor
+%
+% Typical decay: 10% per trial (after first trial, reduce by 0.9x)
+%                Result: after 10 trials, learning rate ~35% of initial
+
+% Curriculum phase boundaries (can be PSO parameters)
+curriculum_phase_boundaries = [1, 2, 3];  % Phases at trials 1, 2, 3
+curriculum_eta_factors = [1.0, 0.5, 0.2];  % Learning rates: 100%, 50%, 20% of initial
+
+% Store initial learning rates for scheduling
+initial_eta_rep = eta_rep;
+initial_eta_W = eta_W;
+
+% In main loop, after each trial boundary (around line ~800):
+for trial = 1:n_trials
+    if trial > 1
+        % Determine which curriculum phase we're in
+        phase_idx = min(find(trial >= curriculum_phase_boundaries));
+        if ~isempty(phase_idx) && phase_idx <= numel(curriculum_eta_factors)
+            scheduled_eta_factor = curriculum_eta_factors(phase_idx);
+            
+            % Update learning rates for this trial
+            eta_rep = initial_eta_rep * scheduled_eta_factor;
+            eta_W = initial_eta_W * scheduled_eta_factor;
+            P.eta_rep = eta_rep;
+            P.eta_W = eta_W;
+            
+            fprintf('Trial %d: Entering curriculum phase %d, learning rates scaled to %.1f%%\n', ...
+                trial, phase_idx, 100*scheduled_eta_factor);
+        end
+    end
+end
+
 for i = 1:N-1
     if mod(i, 100) == 0, fprintf('.'); end
     
@@ -998,7 +1082,7 @@ for i = 1:N-1
                 % Write this into the current trial's motor mapping so the active
                 % task retains the basic velocity-to-output mapping.
                 map_vel_idx = idx_vel(1:min(3, numel(idx_vel)));
-                S.W_motor_L2_to_L1{trial}(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
+                S.W_motor_L2_to_L1(map_vel_idx, 1:3) = eye(numel(map_vel_idx), 3);
 
                 current_trial = trial;
                 S.current_trial = current_trial; % ensure helper uses the updated trial index
@@ -1343,7 +1427,6 @@ fprintf('  • One-hot encoding of current trial\n');
 fprintf('  • Explicit representation enables task-specific learning\n');
 
 fprintf('\n');
-
 end  % End of hierarchical_motion_inference_dual_hierarchy function
 
 % ================================================================
