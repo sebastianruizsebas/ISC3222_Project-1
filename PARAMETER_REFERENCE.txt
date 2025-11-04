@@ -1,0 +1,218 @@
+PARAMETER REFERENCE - Dual-Hierarchy Predictive Coding Model
+Date: November 3, 2025
+Purpose: Quick 1-2 sentence explanation of each parameter
+
+LEARNING PARAMETERS
+
+eta_rep (Representation Learning Rate)
+Controls how quickly hierarchical representations (R_L1, R_L2, R_L3) update based on errors: R_new = R_old + eta_rep * error. Typical range 1e-5 to 1e-4; lower = slower/stable, higher = faster/noisy.
+
+eta_W (Weight Learning Rate)
+Controls how quickly synaptic weights (W_motor, W_plan) update: W_new = W_old - eta_W * dW. Much smaller than eta_rep (1e-3 to 1e-4) because weights should change slowly for stability.
+
+momentum (Temporal Smoothing)
+Implements exponential moving average: R_new = momentum * R_old + (1-momentum) * delta_R. High momentum (0.90+) = smooth slow learning, low momentum (0.70) = reactive noisy learning.
+
+WEIGHT DECAY PARAMETERS
+
+weight_decay (Global Weight Retention)
+Applied at trial boundaries: W_new = weight_decay * W_old to prevent catastrophic forgetting. Value 0.98 means 98% retained, 2% forgotten; affects both motor and planning equally.
+
+decay_motor (Motor Weight Retention at Phase Boundaries)
+Task-conditional decay applied only to motor weights at trial boundaries to preserve learned velocity control across tasks. High retention (0.95) keeps motor weights stable because they should generalize.
+
+decay_plan (Planning Weight Retention at Phase Boundaries)
+Task-conditional decay applied only to planning weights to allow forgetting old task-specific strategies when switching targets. Low retention (0.70) enables faster adaptation to new task structures.
+
+ 
+MOTOR DYNAMICS PARAMETERS
+ 
+
+motor_gain (Motor Command Scaling)
+Scales motor velocity predictions before execution: v_player = motor_gain * pred_vel + noise. Higher values (1.0+) create faster aggressive movements; lower values (0.25-0.5) create slower cautious reaches.
+
+damping (Velocity Decay)
+Implements low-pass filtering on velocity: v_new = damping * v_old + motor_command. High damping (0.92) creates smooth sluggish motion; low damping (0.53) creates sharp responsive motion.
+
+reaching_speed_scale (Curriculum Learning Speed Factor)
+Multiplicative scaling of motor commands during harder trials: eta_W_curriculum = eta_W * reaching_speed_scale. Higher values accelerate learning when tasks become more difficult.
+
+ 
+WEIGHT INITIALIZATION PARAMETERS
+ 
+
+W_motor_gain (Motor Weight Initialization Scale)
+Controls initial magnitude of motor weights: W_motor_init = randn(...) * W_motor_gain. Higher values (0.75) = faster initial predictions but more errors; lower values (0.1) = slower predictions but more stable.
+
+W_plan_gain (Planning Weight Initialization Scale)
+Controls initial magnitude of planning weights: W_plan_init = randn(...) * W_plan_gain. Planning weights typically initialized larger (0.35-0.95) than motor (0.1-0.75) to allow task-specific specialization.
+
+ 
+TASK-CONDITIONAL LEARNING PARAMETERS
+ 
+
+interference_penalty_weight (Cross-Task Interference Penalty)
+Penalizes off-task errors in free energy to prevent catastrophic forgetting: FE += penalty_weight * sum(cross_task_errors^2). Value 0.01 (1% contribution) recommended; higher = stronger task separation.
+
+ 
+PRECISION ADAPTATION PARAMETERS
+ 
+
+alpha_precision_gain (Error-Driven Precision Sensitivity)
+Controls exponential precision scaling: precision_new = precision_old * exp(alpha * error). Higher alpha (2.0) = aggressive precision changes; lower alpha (1.1) = smooth gradual adaptation.
+
+pi_L1_motor_max (L1 Motor Maximum Precision Bound)
+Upper bound on motor proprioceptive precision: precision = clamp(10, pi_L1_motor_max, precision). Range 250-500; higher values allow stronger suppression of proprioceptive errors when confident.
+
+pi_L2_motor_max (L2 Motor Maximum Precision Bound)
+Upper bound on motor basis function precision: precision = clamp(1, pi_L2_motor_max, precision). Range 65-200; controls how strongly basis function errors affect learning.
+
+pi_L1_plan_max (L1 Planning Maximum Precision Bound)
+Upper bound on planning ball position precision: precision = clamp(10, pi_L1_plan_max, precision). Range 50-320; affects how strongly ball trajectory errors drive planning learning.
+
+pi_L2_plan_max (L2 Planning Maximum Precision Bound)
+Upper bound on planning policy precision: precision = clamp(1, pi_L2_plan_max, precision). Range 7-60; typically lower than motor L2 because planning policies vary more across tasks.
+
+ 
+PSO HYPERPARAMETERS
+ 
+
+num_particles (Swarm Size)
+Number of particles (parameter sets) in the swarm for optimization. Value 250; more particles = better exploration but slower, fewer = faster but may miss optimum.
+
+num_iterations (PSO Generations)
+Number of generations the swarm evolves. Value 50; total evaluations = num_particles * num_iterations * 2 = 25,000 model runs.
+
+w (PSO Inertia Weight)
+Controls momentum in PSO velocity updates: velocity_new = w * velocity_old + c1 * (...) + c2 * (...). Value 0.7; higher w (0.9) = more exploration, lower w (0.4) = more exploitation.
+
+c1 (PSO Cognitive - Attraction to Personal Best)
+PSO coefficient controlling each particle's attraction to its own best solution. Value 0.8; encourages particles to remember personal successes.
+
+c2 (PSO Social - Attraction to Global Best)
+PSO coefficient controlling attraction to swarm's global best solution. Value 1.5; typically c2 > c1 to favor collective intelligence over individual memory.
+
+noise_scale (PSO Stochastic Perturbation)
+Scales random noise added to particles to escape local minima. Value 0.1 (10% of parameter range); higher = more exploration, lower = sharper convergence.
+
+fast_debug_mode (Quick Testing Flag)
+When true, uses short 2.5s trials and larger dt=0.02 for rapid PSO testing during development. Set false for full-duration production runs.
+
+ 
+SIMULATION PARAMETERS
+ 
+
+dt (Timestep Size)
+Integration timestep for physics: position(i+1) = position(i) + dt * velocity(i). Value 0.01s (default) or 0.02s (debug); smaller = more accurate but slower.
+
+workspace_bounds (3D Reachable Workspace)
+Defines safe operating region: [-5 5; -5 5; 0 3] meters (x, y, z). Player positions clamped to bounds; z-axis starts at table (0) and extends 3m up.
+
+target_trajectories (Ball Movement Specifications)
+Defines moving target motion with fields: start_position, velocity, acceleration. Constant velocity (accel=0) tests if model can learn velocity prediction.
+
+termination_distance (Interception Success Criterion)
+Trial ends when |player - ball| < termination_distance (typically 0.5m). Enables measurement of convergence speed and success rate.
+
+n_L1_motor, n_L2_motor, n_L3_motor (Motor Layer Sizes)
+Number of units: L1=7 (3 pos + 3 vel + 1 bias), L2=12 (basis functions), L3=6 (motor outputs). Larger layers = more expressivity but slower learning.
+
+n_L1_plan, n_L2_plan, n_L3_plan (Planning Layer Sizes)
+Number of units: L1=7 (3 ball_pos + 3 ball_vel + 1 bias), L2=12 (task-specific basis), L3=6 (planning outputs). Task-indexed: separate copies per trial.
+
+idx_pos, idx_vel, idx_bias (Semantic Indices)
+Defines which L1 elements represent position [1:3], velocity [4:6], bias [7]. Enforces semantic meaning and prevents mixing coordinate systems.
+
+objective_weights.reaching_distance (Reaching Error Weight)
+Relative weight in PSO objective: score = 1.2*reaching_error + 1.1*position_rmse. Higher weight prioritizes accurate interception over model efficiency.
+
+objective_weights.position_rmse (Position RMSE Weight)
+Relative weight of fine-grained trajectory accuracy vs final interception error. Values close to reaching_distance weight (1.1) create balanced optimization.
+
+ 
+DERIVED/COMPUTED PARAMETERS
+ 
+
+noise_annealing_factor (Motor Exploration Decay)
+Computed: max(0.01, 1.0 - i/1000); anneals motor exploration noise over ~1000 steps from 100% to 1%. Implements exploration-to-exploitation transition.
+
+decay (Learning Rate Multiplier)
+Computed: 1 - momentum; converts momentum (retention) to update fraction. If momentum=0.90, decay=0.10, meaning 10% error-driven change per step.
+
+max_finite_value (Overflow Protection)
+Hard upper bound 1e12 preventing NaN/Inf in error and free energy computations. Protects against exponential explosion from precision scaling.
+
+min_precision, max_precision (Precision Bounds)
+Hard bounds [1e-12, 1e12] on all precision values to prevent numerical instability. Prevents division by zero and explosive precision updates.
+
+ 
+PARAMETER TUNING GUIDELINES
+ 
+
+For Faster Learning:
+Increase: eta_rep, eta_W, motor_gain, W_motor_gain
+Decrease: momentum, decay_motor, decay_plan
+Effect: More aggressive updates but risks instability
+
+For Smoother Learning:
+Increase: momentum, damping, decay_motor
+Decrease: eta_rep, eta_W, motor_gain
+Effect: Slower but more stable, less noisy
+
+For Better Task Generalization (motor learns across tasks):
+Increase: decay_motor, W_motor_gain
+Decrease: decay_plan, interference_penalty_weight
+Effect: Motor weights preserved, planning specialized per task
+
+For Better Task Specialization (distinct per-task strategies):
+Decrease: decay_plan, weight_decay
+Increase: interference_penalty_weight
+Effect: Planning weights reset at boundaries, cross-task errors penalized
+
+For Faster PSO Convergence:
+Increase: c2, w
+Decrease: noise_scale
+Effect: Swarm converges faster but may miss global optimum
+
+For Better Global Optimum Search:
+Decrease: c2, w
+Increase: noise_scale, num_iterations
+Effect: Takes longer but finds better parameters
+
+ 
+DEFAULT PARAMETER SET
+ 
+
+eta_rep = 0.00005
+eta_W = 0.001
+momentum = 0.90
+weight_decay = 0.98
+decay_motor = 0.95
+decay_plan = 0.70
+motor_gain = 0.5
+damping = 0.85
+reaching_speed_scale = 0.5
+W_motor_gain = 0.5
+W_plan_gain = 0.65
+interference_penalty_weight = 0.01
+alpha_precision_gain = 1.5
+pi_L1_motor_max = 500
+pi_L2_motor_max = 100
+pi_L1_plan_max = 500
+pi_L2_plan_max = 50
+
+PSO Defaults:
+num_particles = 250
+num_iterations = 50
+w = 0.7
+c1 = 0.8
+c2 = 1.5
+noise_scale = 0.1
+fast_debug_mode = false
+
+Simulation Defaults:
+dt = 0.01
+workspace_bounds = [-5 5; -5 5; 0 3]
+n_L1_motor = 7, n_L2_motor = 12, n_L3_motor = 6
+n_L1_plan = 7, n_L2_plan = 12, n_L3_plan = 6
+idx_pos = [1:3], idx_vel = [4:6], idx_bias = [7]
